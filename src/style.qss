@@ -1,0 +1,243 @@
+/* src/style.qss */
+
+/* Nord Color Palette
+   Polar Night: #2E3440, #3B4252, #434C5E, #4C566A
+   Snow Storm:  #D8DEE9, #E5E9F0, #ECEFF4
+   Frost:       #8FBCBB, #88C0D0, #81A1C1, #5E81AC
+   Aurora:      #BF616A (Red), #D08770 (Orange), #EBCB8B (Yellow), #A3BE8C (Green), #B48EAD (Purple)
+*/
+
+QMainWindow,
+QWidget {
+    background-color: #2E3440;
+    color: #D8DEE9;
+    font-family: "Segoe UI", sans-serif;
+    font-size: 14px;
+}
+
+/* --- Context Menu --- */
+QMenu {
+    background-color: #3B4252;
+    color: #ECEFF4;
+    border: 1px solid #4C566A;
+}
+
+QMenu::item:selected {
+    background-color: #5E81AC;
+    color: #ECEFF4;
+}
+
+QMenu::separator {
+    height: 1px;
+    background: #4C566A;
+}
+
+
+/* --- Group Boxes --- */
+QGroupBox {
+    border: 1px solid #4C566A;
+    border-radius: 6px;
+    margin-top: 24px;
+    font-weight: bold;
+    color: #ECEFF4;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 5px;
+    color: #88C0D0;
+}
+
+/* --- Buttons --- */
+QPushButton {
+    background-color: #434C5E;
+    color: #ECEFF4;
+    border: 1px solid #3B4252;
+    padding: 8px 15px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+QPushButton:hover {
+    background-color: #4C566A;
+    border-color: #5E81AC;
+}
+
+QPushButton:pressed {
+    background-color: #3B4252;
+}
+
+QPushButton:disabled {
+    background-color: #2E3440;
+    color: #4C566A;
+    border: 1px solid #2E3440;
+}
+
+/* Specific Buttons */
+#btn_run {
+    background-color: #A3BE8C;
+    color: #2E3440;
+    border: 1px solid #8FBCBB;
+}
+
+#btn_run:hover {
+    background-color: #8FBCBB;
+}
+
+#btn_run:disabled {
+    background-color: #2E3440;
+    color: #4C566A;
+    border-color: #4C566A;
+}
+
+#btn_stop {
+    background-color: #BF616A;
+    color: #ECEFF4;
+    border: 1px solid #BF616A;
+}
+
+#btn_stop:hover {
+    background-color: #D08770;
+}
+
+#btn_stop:disabled {
+    background-color: #2E3440;
+    color: #4C566A;
+    border-color: #4C566A;
+}
+
+#btn_toggle_headers {
+    background-color: #BF616A;
+    color: #ECEFF4;
+    border: 1px solid #BF616A;
+}
+
+#btn_toggle_headers:hover {
+    background-color: #D08770;
+}
+
+#btn_toggle_headers:checked {
+    background-color: #A3BE8C;
+    border: 1px solid #A3BE8C;
+}
+
+#btn_toggle_headers:checked:hover {
+    background-color: #8FBCBB;
+}
+
+#btn_toggle_headers:disabled {
+    background-color: #2E3440;
+    color: #4C566A;
+    border-color: #4C566A;
+}
+
+/* --- Inputs & Lists --- */
+QTextEdit,
+QListWidget {
+    background-color: #3B4252;
+    border: 1px solid #4C566A;
+    color: #ECEFF4;
+    border-radius: 4px;
+    selection-background-color: #5E81AC;
+    selection-color: #ECEFF4;
+    padding: 5px;
+}
+
+/* --- Combo Box --- */
+QComboBox {
+    background-color: #3B4252;
+    border: 1px solid #4C566A;
+    color: #ECEFF4;
+    padding: 5px;
+    border-radius: 4px;
+}
+
+QComboBox:hover {
+    border-color: #88C0D0;
+}
+
+QComboBox:disabled {
+    background-color: #2E3440;
+    color: #4C566A;
+    border: 1px solid #2E3440;
+}
+
+QComboBox::drop-down {
+    border: 0px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #3B4252;
+    color: #ECEFF4;
+    selection-background-color: #5E81AC;
+}
+
+/* --- Progress Bar --- */
+QProgressBar {
+    border: 1px solid #4C566A;
+    border-radius: 4px;
+    text-align: center;
+    background-color: #2E3440;
+    color: #ECEFF4;
+}
+
+QProgressBar::chunk {
+    background-color: #88C0D0;
+    width: 20px;
+}
+
+/* --- Splitter & Labels --- */
+QSplitter::handle {
+    background-color: #4C566A;
+}
+
+QLabel {
+    color: #D8DEE9;
+}
+
+#lbl_proofread {
+    color: #ECEFF4;
+    font-size: 12px;
+}
+
+/* --- Tabs --- */
+QTabWidget::pane {
+    border: 1px solid #4C566A;
+    background-color: #2E3440;
+    border-top: 1px solid #4C566A;
+}
+
+QTabBar::tab {
+    background-color: #3B4252;
+    color: #D8DEE9;
+    padding: 8px 12px;
+    border: 1px solid #4C566A;
+    border-bottom: none;
+    margin-right: 2px;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+}
+
+QTabBar::tab:selected {
+    background-color: #2E3440; /* Blend with pane */
+    color: #88C0D0; /* Highlight text */
+    border-bottom: 1px solid #2E3440; /* Hide bottom border to blend */
+    font-weight: bold;
+}
+
+QTabBar::tab:!selected {
+    margin-top: 2px; /* Make unselected tabs slightly smaller/lower */
+}
+
+QTabBar::tab:disabled {
+    color: #4C566A;
+    background-color: #2E3440;
+    border-color: #2E3440;
+}
+
+/* --- Image Viewer Navigation Buttons --- */
+#btn_up, #btn_down {
+    font-size: 20px;
+    font-weight: bold;
+}
