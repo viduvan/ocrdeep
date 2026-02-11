@@ -15,7 +15,7 @@ TARGET_IMAGE_SIZE = (1024, 1024)
 # Configuration from Ollama Modelfile
 INFERENCE_PARAMS = {
     "temperature": 0.1,
-    "num_ctx": 4096,
+    "max_tokens": 4096,
 }
 
 PROMPTS = {

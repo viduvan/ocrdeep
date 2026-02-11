@@ -13,11 +13,11 @@ services:
     environment:
       - HF_HOME=/opt/models
       - VLLM_LOGGING_LEVEL=DEBUG
-      - HF_HUB_OFFLINE=1
-    # Command points to the baked-in model path
-    # Note: caching mechanism in vllm/huggingface will find it in HF_HOME
+      # - HF_HUB_OFFLINE=1
+      # Command points to the baked-in model path
+      # Note: caching mechanism in vllm/huggingface will find it in HF_HOME
     command: >
-      --model deepseek-ai/DeepSeek-OCR --trust-remote-code --max-model-len 8192 --dtype auto --gpu-memory-utilization 0.9
+      --model deepseek-ai/DeepSeek-OCR --trust-remote-code --max-model-len 8192 --dtype auto --gpu-memory-utilization 0.9 --host 0.0.0.0 --port 8000
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/v1/models" ]
       interval: 30s
