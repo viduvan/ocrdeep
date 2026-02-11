@@ -129,9 +129,9 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
         "stt": ["stt", "no.", "no"],
         "name": ["tên hàng", "description", "tên sản phẩm", "diễn giải", "hàng hóa", "nhãn hiệu", "quy cách", "phẩm chất"],
         "code": ["mã số", "mã hàng", "mã sp", "product code", "code"],
-        "price": ["đơn giá", "price", "unit price"],
+        "price": ["đơn giá", "unit price"],  # Removed standalone "price" to avoid collision with Price=Amount column
         "tax_amt": ["tiền thuế", "tax amount", "vat amount"],  # BEFORE amount!
-        "amount": ["thành tiền", "amount", "trị giá"],  # After tax_amt
+        "amount": ["thành tiền", "amount", "trị giá", "price"],  # Added "price" for English invoices (standalone Price column = total)
         "unit": ["đvt", "đơn vị", "unit"],
         "qty": ["số lượng", "sl", "quantity", "qty"],
         "tax_rate": ["thuế suất", "tax rate", "vat rate"],
