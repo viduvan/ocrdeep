@@ -1,0 +1,29 @@
+# Base image from vLLM
+FROM vllm/vllm-openai:latest
+
+# Set environment variables for HuggingFace cache
+ENV HF_HOME=/opt/models
+ENV TRANSFORMERS_CACHE=/opt/models
+
+# Create model directory
+RUN mkdir -p /opt/models
+
+# Install huggingface_hub to download model
+RUN pip install huggingface_hub
+
+# Pre-download the model into the image
+# This adds size to the image but eliminates runtime downloads
+RUN python3 -c "from huggingface_hub import snapshot_download; \
+    import os; \
+    model = 'deepseek-ai/DeepSeek-OCR'; \
+    print(f'Downloading model: {model}...'); \
+    snapshot_download(model, cache_dir='/opt/models', token=False); \
+    print(f'Model {model} successfully downloaded and cached in image')"
+
+# Verify model presence
+RUN ls -la /opt/models
+
+# Usage:
+# When running this image, mount a volume to /opt/models isn't strictly necessary 
+# if you want to use the baked-in model, but vLLM might need write access.
+# docker run --gpus all -p 8000:8000 this-image --model deepseek-ai/DeepSeek-OCR

@@ -12,7 +12,7 @@ import os
 import asyncio
 
 from src import file_handler, config
-from src.ollama_service import stream_ocr_response, OCRTimeoutError
+from src.vllm_service import stream_ocr_response, OCRTimeoutError
 from src.utils.table_guard import TableGuard
 from src.utils.date_utils import parse_vn_date
 from src.schemas.invoice import Invoice
@@ -173,7 +173,7 @@ def run_vision_ocr(
 )
 async def detect_single_invoice_ocr(
     file: UploadFile = File(...),
-    model_name: str = Form(config.OLLAMA_MODEL),
+    model_name: str = Form(config.VLLM_MODEL),
     ocr_mode: str = Form(config.DEFAULT_OCR_MODE),
     semantic: bool = Form(True),
     pages: str = Form(None),
@@ -443,7 +443,7 @@ async def detect_single_invoice_ocr(
 )
 async def detect_invoice_ocr(
     files: List[UploadFile] = File(...),  # Changed to support multiple files
-    model_name: str = Form(config.OLLAMA_MODEL),
+    model_name: str = Form(config.VLLM_MODEL),
     ocr_mode: str = Form(config.DEFAULT_OCR_MODE),  # chọn model OCR từ config.py
     semantic: bool = Form(True), # bật/tắt tinh chỉnh ngữ nghĩa
     pages: str = Form(None),  # Optional: "1,3" or "1-3" or "all" or None (=all)
@@ -765,7 +765,7 @@ async def detect_invoice_ocr(
 )
 async def ocr_citizen_id(
     files: List[UploadFile] = File(...),  # 1-2 images: front and optionally back
-    model_name: str = Form(config.OLLAMA_MODEL),
+    model_name: str = Form(config.VLLM_MODEL),
     ocr_mode: str = Form("plain"),
     per_file_timeout: int = Form(config.OCR_TIMEOUT_SECONDS),
 ):
@@ -927,7 +927,7 @@ async def ocr_cccd_realtime(request: CCCDRealtimeRequest):
     import base64
     from src.parsers.cccd_parser import parse_cccd
     
-    model_name = request.model_name or config.OLLAMA_MODEL
+    model_name = request.model_name or config.VLLM_MODEL
     timeout = request.timeout_seconds or config.OCR_TIMEOUT_SECONDS
     
     if not request.front_image:

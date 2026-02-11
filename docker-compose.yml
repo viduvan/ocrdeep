@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  # vLLM service with baked-in model
+  vllm:
+    build:
+      context: .
+      dockerfile: Dockerfile.vllm-model
+    image: ocr-vllm-model:latest
+    container_name: ocr-vllm-model
+    ports:
+      - "8000:8000"
+    environment:
+      - HF_HOME=/opt/models
+      - VLLM_LOGGING_LEVEL=DEBUG
+      - HF_HUB_OFFLINE=1
+    # Command points to the baked-in model path
+    # Note: caching mechanism in vllm/huggingface will find it in HF_HOME
+    command: >
+      --model deepseek-ai/DeepSeek-OCR --trust-remote-code --max-model-len 8192 --dtype auto --gpu-memory-utilization 0.9
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/v1/models" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+
+  # FastAPI service (Standard)
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ocr-api:latest
+    container_name: ocr-api-model
+    ports:
+      - "8888:8000"
+    volumes:
+      # Mount source code for development (optional)
+      - ./src:/app/src
+    environment:
+      - VLLM_HOST=http://vllm:8000/v1
+      - VLLM_MODEL=deepseek-ai/DeepSeek-OCR
+    depends_on:
+      vllm:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  default:
+    name: ocr-network-model

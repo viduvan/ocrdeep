@@ -1,13 +1,13 @@
 # src/config.py
 import sys
+import os
 
 APP_VERSION = "v1"
 
-
-
-
-OLLAMA_HOST = "http://127.0.0.1:11434"
-OLLAMA_MODEL = "deepseek-ocr:3b"
+# vLLM inference server
+# Can be overridden by environment variables (e.g., in Docker)
+VLLM_HOST = os.getenv("VLLM_HOST", "http://127.0.0.1:8000/v1")
+VLLM_MODEL = os.getenv("VLLM_MODEL", "deepseek-ai/DeepSeek-OCR")
 
 # DeepSeek-OCR expects 1024x1024 inputs
 TARGET_IMAGE_SIZE = (1024, 1024)

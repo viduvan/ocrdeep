@@ -6,7 +6,7 @@ import time
 import re
 import ast
 from PySide6.QtCore import QThread, Signal
-from src.ollama_service import stream_ocr_response
+from src.vllm_service import stream_ocr_response
 from src import file_handler
 from src import config
 

@@ -1,6 +1,6 @@
 import json
 import time
-from src.ollama_service import get_ollama_client
+from src.vllm_service import get_vllm_client
 from src import config
 
 
@@ -38,12 +38,12 @@ Current JSON:
 {json.dumps(invoice_dict, ensure_ascii=False)}
 """
 
-    client = get_ollama_client()
+    client = get_vllm_client()
 
     start = time.time()
     try:
         response = client.chat(
-            model=config.OLLAMA_MODEL,
+            model=config.VLLM_MODEL,
             messages=[{"role": "user", "content": prompt}],
             options={
                 "temperature": 0,
