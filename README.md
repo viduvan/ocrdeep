@@ -1,134 +1,170 @@
-# 🚀 Hướng Dẫn Setup và Chạy OCR Project trên Ubuntu
+# DeepSeek-OCR (vLLM + FastAPI + Docker)
 
-## 📋 Yêu Cầu Hệ Thống
+Local Vision OCR API sử dụng:
 
-- **OS**: Ubuntu 20.04+ hoặc Linux tương đương
-- **Python**: Python 3.8+ (đã cài sẵn trên hệ thống)
-- **RAM**: Tối thiểu 8GB (khuyến nghị 16GB)
-- **Dung lượng**: ~15GB trống (cho models và dependencies)
-- **Kết nối**: Internet ổn định để tải models
+- **DeepSeek-OCR** (Vision model)
+- **vLLM** OpenAI-compatible server
+- **FastAPI** backend
+- **Docker Compose**
+- **GPU** (NVIDIA)
 
----
+**Hỗ trợ:**
 
-
-## ⚙️ Bước 1: Setup Environment (Chạy 1 Lần Duy Nhất)
-
-### 2.1. Di chuyển vào thư mục project
-
-```bash
-cd "~/ocr-deep"
-```
-
-### 2.2. Chạy script setup
-
-```bash
-./env_setup.sh
-```
-
-**Script này sẽ tự động:**
-- ✅ Tạo Python virtual environment
-- ✅ Cài đặt tất cả Python dependencies từ `requirements.txt`
-- ✅ Tải Ollama (1.5GB)
-- ✅ Tải DeepSeek-OCR model (6.7GB)
-
-**⏱️ Thời gian:** 10-20 phút (tùy tốc độ mạng)
-
-## 🏃 Bước 2: Chạy API Server
-
-### 2.1. Khởi động server
-
-```bash
-./run_api_localhost.sh
-```
-
-### 2.2. Kiểm tra server đang chạy
-
-Bạn sẽ thấy output như sau:
-
-```
-==============================
-Pre-flight checks...
-==============================
-✓ Python found: /path/to/python/bin/python3
-✓ Ollama found: /path/to/ollama/bin/ollama
-
-==============================
-Starting Ollama (background)...
-==============================
-- Ollama started with PID: 12345
-- Waiting for Ollama to be ready...
-✓ Ollama is ready and responding at http://127.0.0.1:11434
-
-==============================
-Starting FastAPI (foreground)...
-==============================
-- Server will be available at: http://0.0.0.0:8000
-- API docs will be at: http://0.0.0.0:8000/docs
-- Press Ctrl+C to stop both services
-==============================
-```
-
-### 2.3. Truy cập API
-
-- **API Server**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs (Swagger UI)
-- **Alternative Docs**: http://localhost:8000/redoc
+- OCR hóa đơn (single / multi-page PDF)
+- OCR CCCD (upload file hoặc realtime base64)
+- Streaming inference
+- Timeout protection
+- Zoom-in header pass
+- Semantic refinement
 
 ---
 
-
-## 📝 Cấu Trúc Thư Mục
+## 📦 Architecture
 
 ```
-local_ai_ocr-master - Copy/
-├── env_setup.sh              # Script setup môi trường (chạy 1 lần)
-├── run_api_localhost.sh      # Script chạy API server
-├── requirements.txt          # Python dependencies
-├── src/
-│   └── api_server.py        # FastAPI application
-├── python/                   # Virtual environment (tự tạo)
-├── ollama/                   # Ollama binary (tự tải)
-└── models/                   # OCR models (tự tải)
+Client
+   ↓
+FastAPI (Port 8888)
+   ↓
+vLLM Server (Port 8000)
+   ↓
+DeepSeek-OCR Model (GPU)
+```
+
+**Docker services:**
+
+| Service | Port | Description |
+| :--- | :--- | :--- |
+| `vllm` | 8000 | Model inference server |
+| `api` | 8888 | FastAPI wrapper |
+
+---
+
+## �️ Requirements
+
+- Ubuntu 20.04+
+- Docker
+- Docker Compose (v2 recommended)
+- NVIDIA Driver
+- NVIDIA Container Toolkit
+- GPU (>= 16GB VRAM recommended)
+
+---
+
+## ⚙️ Setup
+
+### 1️⃣ Clone project
+
+```bash
+git clone <your-repo>
+cd <project-folder>
+```
+
+### 2️⃣ Build images
+
+✅ **Recommended:**
+```bash
+docker compose build
+```
+
+**Clean rebuild:**
+```bash
+docker compose build --no-cache
+```
+
+### 3️⃣ Run services
+
+```bash
+docker compose up -d
+```
+
+Hoặc build + run luôn:
+```bash
+docker compose up -d --build
 ```
 
 ---
 
+## 🧪 Verify
 
-## 🔄 Workflow 
-
-### Lần đầu tiên:
+**Check containers:**
 ```bash
-# 1. Setup (chỉ 1 lần)
-./env_setup.sh
-
-# 2. Chạy server
-./run_api_localhost.sh
+docker ps
 ```
 
-### Các lần sau:
+**Check vLLM model:**
 ```bash
-# Chỉ cần chạy server
-./run_api_localhost.sh
+curl http://localhost:8000/v1/models
 ```
 
-## 🎯 Tóm Tắt Commands
-
+**Check API health:**
 ```bash
-# Setup (1 lần duy nhất)
-./env_setup.sh
+curl http://localhost:8888/health
+```
 
-# Chạy server
-./run_api_localhost.sh
-
-# Dừng server
-Ctrl+C
-
-# Re-setup (nếu cần)
-rm -rf python/ ollama/ models/
-./env_setup.sh
+**Swagger UI:**
+```
+http://<server-ip>:8888/docs
 ```
 
 ---
 
-**Chúc bạn sử dụng thành công! 🎉**
+## 📂 Project Structure
+
+| File | Description |
+| :--- | :--- |
+| `Dockerfile.vllm-model` | Build vLLM image + pre-download model vào `/opt/models` |
+| `Dockerfile` | Build API image (Python 3.11 + FastAPI) |
+| `docker-compose.yml` | Orchestrate cả 2 services |
+| `build_images.sh` | Script build nhanh cả 2 images |
+| `.dockerignore` | Loại bỏ file không cần thiết khi build |
+
+---
+
+## ⚙️ Configuration
+
+Các thông số chính trong `docker-compose.yml`:
+
+| Setting | Value | Description |
+| :--- | :--- | :--- |
+| `gpu-memory-utilization` | `0.9` | Sử dụng 90% VRAM cho model + KV cache |
+| `max-model-len` | `8192` | Context window (tối đa token/request) |
+| `dtype` | `auto` | Tự động chọn FP16/BF16 theo GPU |
+| `VLLM_HOST` | `http://vllm:8000/v1` | API kết nối tới vLLM qua Docker network |
+| `VLLM_MODEL` | `deepseek-ai/DeepSeek-OCR` | Model name cho API client |
+
+---
+
+## 📋 Logs
+
+**Xem log realtime:**
+```bash
+docker compose logs -f vllm
+docker compose logs -f api
+```
+
+**Xem log gần nhất:**
+```bash
+docker compose logs --tail=50 vllm
+```
+
+**Dừng tất cả:**
+```bash
+docker compose down
+```
+
+---
+
+## ❓ Troubleshooting
+
+| Lỗi | Nguyên nhân | Cách fix |
+| :--- | :--- | :--- |
+| `Exit Code 137` | Out of Memory (VRAM/RAM) | Giảm `gpu-memory-utilization` (0.8 → 0.7) |
+| `API Unhealthy` | vLLM chưa sẵn sàng khi API start | `docker compose restart api` |
+| `Network unreachable` khi build | Không có internet | Cần internet khi build lần đầu (tải model) |
+| `CUDA error` | GPU driver không tương thích | Cài NVIDIA Container Toolkit |
+
+---
+
+
 
