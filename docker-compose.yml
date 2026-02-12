@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # vLLM service with baked-in model
   vllm:
@@ -10,6 +8,7 @@ services:
     container_name: ocr-vllm-model
     ports:
       - "8000:8000"
+    shm_size: "8gb"
     environment:
       - HF_HOME=/opt/models
       - VLLM_LOGGING_LEVEL=DEBUG
@@ -17,13 +16,13 @@ services:
       # Command points to the baked-in model path
       # Note: caching mechanism in vllm/huggingface will find it in HF_HOME
     command: >
-      --model deepseek-ai/DeepSeek-OCR --trust-remote-code --max-model-len 4096 --dtype auto --gpu-memory-utilization 0.85 --host 0.0.0.0 --port 8000
+      --model deepseek-ai/DeepSeek-OCR --trust-remote-code --max-model-len 3072 --dtype auto --gpu-memory-utilization 0.85 --host 0.0.0.0 --port 8000
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/v1/models" ]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 200s
+      start_period: 400s
     restart: unless-stopped
     deploy:
       resources:
