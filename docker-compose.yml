@@ -17,13 +17,13 @@ services:
       # Command points to the baked-in model path
       # Note: caching mechanism in vllm/huggingface will find it in HF_HOME
     command: >
-      --model deepseek-ai/DeepSeek-OCR --trust-remote-code --max-model-len 8192 --dtype auto --gpu-memory-utilization 0.9 --host 0.0.0.0 --port 8000
+      --model deepseek-ai/DeepSeek-OCR --trust-remote-code --max-model-len 4096 --dtype auto --gpu-memory-utilization 0.85 --host 0.0.0.0 --port 8000
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/v1/models" ]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 200s
     restart: unless-stopped
     deploy:
       resources:
