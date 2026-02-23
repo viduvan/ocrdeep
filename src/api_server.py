@@ -29,7 +29,7 @@ from src.parsers.block_invoice_parser import parse_invoice_block_based, parse_he
 
 app = FastAPI(
     title="Local Vision OCR API",
-    description="FastAPI wrapper for local Vision OCR (same engine as UI)",
+    description="FastAPI wrapper for local Vision OCR",
     version="1.0.0",
 )
 
@@ -433,9 +433,8 @@ async def detect_single_invoice_ocr(
         }
 
 
-# ================================
+
 # API ENDPOINT - Multiple Files
-# ================================
 
 @app.post(
     "/ocr-invoices",
