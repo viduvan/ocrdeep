@@ -16,7 +16,7 @@ def normalize_invoice_output(raw_text: str) -> dict:
         "invoiceName": None,
         "invoiceDate": None,
         "invoiceSerial": None,
-        "currency": "VND",
+        "currency": None,
 
         "sellerName": None,
         "sellerTaxCode": None,

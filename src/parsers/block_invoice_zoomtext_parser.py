@@ -37,18 +37,24 @@ def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
         
         # --- Invoice Name (Title) ---
         # Extract from ZOOM TEXT. Force overwrite because Zoom header is authoritative.
-        invoice_type_keywords = ["HÓA ĐƠN", "VAT INVOICE", "PHIẾU XUẤT KHO", "PHIẾU NHẬP KHO", "PHIẾU BÁN HÀNG"]
+        invoice_type_keywords = ["HÓA ĐƠN", "VAT INVOICE", "PHIẾU XUẤT KHO", "PHIẾU NHẬP KHO", "PHIẾU BÁN HÀNG",
+                                 "COMMERCIAL INVOICE", "PROFORMA INVOICE", "TAX INVOICE"]
         up = clean.upper()
         # Fix: "Bản thể hiện..." contains "HÓA ĐƠN" but isn't the title. Exclude it.
         if any(kw in up for kw in invoice_type_keywords) and "THỂ HIỆN" not in up and "BẢN SAO" not in up:
             # Clean markdown markers
             name = clean.lstrip("# ").strip().strip("*")
+            # Strip "- No20250321003" suffix for clean invoiceName
+            name_clean = re.sub(r'\s*[-\u2013\u2014]\s*No\.?\s*[A-Z0-9]+$', '', name, flags=re.I).strip()
             # Exclude lines that are likely part of a sentence (unless it's remarkably short)
             # e.g. "Cần kiểm tra đối chiếu khi lập, giao, nhận hóa đơn" -> contains "hóa đơn" but long
-            if name and len(name) > 5 and len(name) < 50:
-                 # Update if we haven't found a strong title in Zoom yet (or strictly prefer shorter/cleaner ones?)
-                 # For now, just overwrite.
-                 invoice.invoiceName = name
+            if name_clean and len(name_clean) > 5 and len(name_clean) < 50:
+                 invoice.invoiceName = name_clean
+            
+            # Extract invoiceID from "INVOICE - No20250321003" format
+            m_inv = re.search(r'INVOICE\s*[-\u2013\u2014]\s*No\.?\s*([A-Z0-9]+)', name, re.I)
+            if m_inv and not invoice.invoiceID:
+                invoice.invoiceID = m_inv.group(1)
 
         
         # --- Invoice ID Parsing ---

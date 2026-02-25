@@ -222,21 +222,26 @@ def number_to_vietnamese_words(number: float) -> str:
 
 SELLER_LABEL_KEYS = {
     "sellerName": ["tên đơn vị bán", "đơn vị bán", "đơn vị bán hàng", "comname", "dơn vị bán hàng", "the seller",
-                   "bên a (bên bán)", "bên bán", "bên a"],  # Added for BIÊN BẢN HỦY HÓA ĐƠN
+                   "bên a (bên bán)", "bên bán", "bên a",
+                   "shipper", "beneficiary"],  # EN: SHIPPER/BENEFICIARY = Seller
     "sellerTaxCode": ["mã số thuế", "tax code", "mst", "vat:"],  # Added MST abbreviation & VAT
     "sellerAddress": ["địa chỉ", "address"],
     "sellerPhoneNumber": ["điện thoại", "tel", "số điện thoại"],
-    "sellerBankAccountNumber": ["số tài khoản", "bankno", "account no", "ac no", "stk"],
-    "sellerBank": ["ngân hàng", "bankname", "tại ngân hàng", "bank"],  # Added for separated bank name
+    "sellerBankAccountNumber": ["số tài khoản", "bankno", "account no", "ac no", "stk",
+                                "beneficiary's account"],  # EN: BENEFICIARY'S ACCOUNT
+    "sellerBank": ["ngân hàng", "bankname", "tại ngân hàng", "bank:",
+                   "beneficiary's bank"],  # EN: BENEFICIARY'S BANK
     "sellerEmail": ["email"],
 }
 
 BUYER_LABEL_KEYS = {
     "buyerName": ["tên đơn vị mua", "đơn vị mua", "buyer", "cusname", "tên đơn vị", "company's name", "the buyer", "đơn vị (co. name)", "co. name",
-                  "bên b (bên mua)", "bên mua", "bên b"],  # Added for BIÊN BẢN HỦY HÓA ĐƠN
+                  "bên b (bên mua)", "bên mua", "bên b",
+                  "consignee"],  # EN: CONSIGNEE = Buyer
     "buyerTaxCode": ["mã số thuế", "tax code", "mst"],
     "buyerAddress": ["địa chỉ", "address"],
     "buyerEmail": ["email"],
+    "buyerPhoneNumber": ["điện thoại", "tel", "số điện thoại"],
 }
 
 
@@ -285,6 +290,14 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
         "total": [],
         "signature": [],
     }
+    
+    # Filter out ZOOM TEXT section — it duplicates data and causes double items
+    filtered_lines = []
+    for line in lines:
+        if '--- ZOOM TEXT ---' in line or '---ZOOM TEXT---' in line:
+            break  # Stop processing at ZOOM TEXT marker
+        filtered_lines.append(line)
+    lines = filtered_lines
 
     current = "seller"
     seen_header = False
@@ -334,6 +347,9 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
             "biên bản hủy",               # Added: Invoice cancellation documents
             "biên bản",                   # Added: General documents
             "vat invoice",
+            "commercial invoice",         # EN: COMMERCIAL INVOICE
+            "proforma invoice",           # EN: PROFORMA INVOICE
+            "tax invoice",                # EN: TAX INVOICE
             "kí hiệu",
             "ký hiệu",
             "mẫu số",
@@ -346,15 +362,16 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
         # ===== SELLER (sau header - format header-first) =====
         # Khi thấy "đơn vị bán hàng" sau header, chuyển về seller block
         # HOẶC nếu đang ở Header mà thấy MST/Địa chỉ/SĐT (dấu hiệu seller info) thì chuyển sang Seller
-        # Support English: "THE Seller:" and Vietnamese: "BÊN A (Bên bán)"
-        elif (any(k in l for k in ["đơn vị bán hàng", "seller:", "the seller:", "bên a (bên bán)", "bên bán)", "bên a:"]) or 
+        # Support English: "THE Seller:", "SHIPPER" and Vietnamese: "BÊN A (Bên bán)"
+        elif (any(k in l for k in ["đơn vị bán hàng", "seller:", "the seller:", "bên a (bên bán)", "bên bán)", "bên a:",
+                                    "shipper", "寄货人"]) or 
               (current == "header" and any(k in l for k in ["mã số thuế", "địa chỉ", "điện thoại", "tax code", "address", "website"]))) \
               and not seen_buyer:
             current = "seller"
 
         # ===== BUYER (KHÔNG CẦN SEEN_HEADER) =====
         # Chuyển sang buyer khi gặp keywords chỉ người mua
-        # Support English: "THE Buyer:" and Vietnamese: "Người mua (Buyer):", "Khách hàng:", "BÊN B (Bên mua)"
+        # Support English: "THE Buyer:", "CONSIGNEE" and Vietnamese: "Người mua (Buyer):", "Khách hàng:", "BÊN B (Bên mua)"
         elif any(k in l for k in [
             "khách hàng",           # Added: Vietnamese for "Customer"
             "họ tên người mua",
@@ -365,10 +382,13 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
             "the buyer:",
             "customer's name",
             "customer:",
+            "bill to",              # Added: English "Bill to:" pattern
             "nhập tại kho",        # Added: For internal transfer slips
             "bên b (bên mua)",     # Added: For BIÊN BẢN HỦY HÓA ĐƠN
             "bên mua)",            # Added: Partial match
             "bên b:",              # Added: For BIÊN BẢN
+            "consignee",           # EN: CONSIGNEE = Buyer
+            "收货人",               # CN: 收货人 = Consignee
         ]):
             current = "buyer"
             seen_buyer = True
@@ -423,22 +443,31 @@ def parse_header(block: List[str], invoice: Invoice):
         # Note: Title may be split like "# HÓA ĐƠN" then "GIÁ TRỊ GIA TĂNG"
         # FIX: Allow lines containing "GIÁ TRỊ" to be appended even if they don't have "HÓA ĐƠN"
         # Match invoice types: HÓA ĐƠN, PHIẾU XUẤT KHO, VAT INVOICE, etc.
-        invoice_type_keywords = ["HÓA ĐƠN", "VAT INVOICE", "PHIẾU XUẤT KHO", "PHIẾU NHẬP KHO", "PHIẾU BÁN HÀNG"]
+        invoice_type_keywords = ["HÓA ĐƠN", "VAT INVOICE", "PHIẾU XUẤT KHO", "PHIẾU NHẬP KHO", "PHIẾU BÁN HÀNG",
+                                 "COMMERCIAL INVOICE", "PROFORMA INVOICE", "TAX INVOICE"]
         is_invoice_title = any(kw in up for kw in invoice_type_keywords)
         is_continuation = "GIÁ TRỊ" in up and invoice.invoiceName
         
         if (is_invoice_title or is_continuation) and "thay thế" not in low:
             # Clean markdown header markers
             name = line.strip().lstrip("# ").strip()
-            if name:
+            # For "COMMERCIAL INVOICE - No20250321003", strip the No... part for invoiceName
+            name_clean = re.sub(r'\s*[-–—]\s*No\.?\s*[A-Z0-9]+$', '', name, flags=re.I).strip()
+            if name_clean:
                 if not invoice.invoiceName:
-                    invoice.invoiceName = name
+                    invoice.invoiceName = name_clean
                 elif "GIÁ TRỊ" in up and "GIÁ TRỊ" not in invoice.invoiceName.upper():
                     # Concatenate second line of split title
-                    invoice.invoiceName = invoice.invoiceName + " " + name
+                    invoice.invoiceName = invoice.invoiceName + " " + name_clean
                 elif "KIÊM" in up and "KIÊM" not in invoice.invoiceName.upper():
                     # Handle "PHIẾU XUẤT KHO" + "KIÊM VẬN CHUYỂN NỘI BỘ"
-                    invoice.invoiceName = invoice.invoiceName + " " + name
+                    invoice.invoiceName = invoice.invoiceName + " " + name_clean
+            
+            # Extract invoiceID from "INVOICE - No20250321003" format
+            if not invoice.invoiceID:
+                m_inv = re.search(r'INVOICE\s*[-–—]\s*No\.?\s*([A-Z0-9]+)', name, re.I)
+                if m_inv:
+                    invoice.invoiceID = m_inv.group(1)
 
         # Date: Ngày 18 tháng 12 năm 2025
         # Date: Ngày (date) 20 tháng (month) 10 năm (year) 2025
@@ -533,9 +562,16 @@ def parse_seller(lines: List[str], invoice: Invoice):
         # Pattern: "CÔNG TY CỔ PHẦN VẬT LIỆU HOME" ở dòng đầu
         if not first_line_checked:
             first_line_checked = True
-            # Nếu dòng đầu chứa "CÔNG TY" và không có dấu ":" → đây là tên seller
-            if "công ty" in low and ":" not in clean and not invoice.sellerName:
+            # Nếu dòng đầu KHÔNG chứa keywords loại trừ và không có dấu ":" → đây là tên seller (fallback)
+            # Relax check: "Chau Huu Materials" doesn't have "CÔNG TY"
+            is_keyword = any(k in low for k in ["hóa đơn", "phiếu", "mẫu số", "ký hiệu", "liên", "date", "ngày", "số:", "no:"])
+            # Also exclude section header labels (SHIPPER INFORMATION, 寄货人资料 etc.)
+            is_header_label = any(k in low for k in ["information", "寄货人", "资料", "收货人", "shipper", "consignee",
+                                                       "shippes", "country of"])
+            if not is_keyword and not is_header_label and ":" not in clean and len(clean) > 3 and not invoice.sellerName:
                 invoice.sellerName = clean
+                # Mark next unlabeled line as potential address
+                pending_field = "sellerAddress"
                 continue
 
         # ===== EMAIL (có thể xuất hiện trên cùng dòng với phone) =====
@@ -545,6 +581,8 @@ def parse_seller(lines: List[str], invoice: Invoice):
 
         for field, keys in SELLER_LABEL_KEYS.items():
             if any(k in low for k in keys):
+                # Clear pending_field when we match a new labeled field
+                pending_field = None
 
 
                 # ===== PHONE =====
@@ -700,8 +738,11 @@ def parse_seller(lines: List[str], invoice: Invoice):
             elif re.fullmatch(r"0\d{9,10}", clean) and not invoice.sellerPhoneNumber:
                 invoice.sellerPhoneNumber = clean
             # Bank account without label (long number with possible separators)
+            # EXCLUDE international phone numbers like 86-18929233070 (country_code-number)
             elif re.fullmatch(r"[\d\.\-]{10,20}", clean) and not invoice.sellerBankAccountNumber:
-                invoice.sellerBankAccountNumber = clean.replace(".", "")
+                # Check if it looks like an intl phone: 1-2 digit country code + hyphen + 9-11 digits
+                if not re.fullmatch(r"\d{1,3}-\d{9,11}", clean):
+                    invoice.sellerBankAccountNumber = clean.replace(".", "")
             # Bank name without label
             elif "ngân hàng" in low and not invoice.sellerBank:
                 # Extract bank name
@@ -713,9 +754,12 @@ def parse_seller(lines: List[str], invoice: Invoice):
 
 
 def parse_buyer(block: List[str], invoice: Invoice):
+    pending_field = None  # Track which field expects continuation on next line
+    
     for line in block:
         clean = line.strip().replace("**", "")
         low = clean.lower()
+        matched = False
 
         # ===== EMAIL =====
         email = extract_email(clean)
@@ -728,15 +772,21 @@ def parse_buyer(block: List[str], invoice: Invoice):
         # Skip lines with "Người mua (Buyer):" that have CCCD immediately after
         if any(k in low for k in [
             "tên đơn vị",
+            "tên người mua hàng",  # Added
+            "người mua hàng",      # Added
             "họ tên người mua hàng",
             "khách hàng",
             "company's name",
             "đơn vị (co. name)",
             "co. name",
+            "bill to",              # Added for English invoices
             "bên b (bên mua)",  # Added for BIÊN BẢN HỦY HÓA ĐƠN
             "bên mua)",         # Partial match
             "bên b:",           # Direct match
+            "consignee",        # EN: CONSIGNEE = Buyer
+            "company name",     # EN: COMPANY NAME
         ]):
+            pending_field = None
             # Special handling for BÊN B pattern - extract after last colon
             if "bên b" in low or "bên mua" in low:
                 colon_idx = clean.rfind(":")
@@ -744,29 +794,61 @@ def parse_buyer(block: List[str], invoice: Invoice):
                     value = clean[colon_idx + 1:].strip()
                     if value and ("công ty" in value.lower() or "doanh nghiệp" in value.lower()):
                         invoice.buyerName = value
+                        matched = True
                         continue
             
+            # For CONSIGNEE/COMPANY NAME label: value is likely on the NEXT line
+            if "company name" in low or "consignee" in low:
+                # Check if there's a value after colon
+                if ":" in clean:
+                    value = clean.split(":", 1)[-1].strip()
+                    if value and len(value) > 3:
+                        invoice.buyerName = value
+                    else:
+                        pending_field = "buyerName"
+                else:
+                    pending_field = "buyerName"
+                matched = True
+                continue
+            
+            # Require colon for standard Label: Value pairs to avoid matching "Người mua hàng" signature title
+            if ":" not in clean:
+                continue
+                
             value = clean.split(":", 1)[-1].strip()
             # Skip if value contains CCCD marker or is empty/junk
             if value and "cccd" not in value.lower() and "(citizen id" not in value.lower():
                 if len(value) > 3 and not re.match(r'^[\*\s]+$', value):
                     invoice.buyerName = value
+            else:
+                pending_field = "buyerName"
+            matched = True
 
         #TAX CODE - support MST abbreviation
         elif "mã số thuế" in low or "tax code" in low or "mst" in low:
             m = re.search(r"(\d{10,14}(-\d+)?)", clean)
             if m:
                 invoice.buyerTaxCode = m.group(1)
+            pending_field = None
+            matched = True
 
         # ADDRESS (including "Nhập tại kho" for internal transfer slips)
         elif "địa chỉ" in low or "address" in low or "nhập tại kho" in low:
-            invoice.buyerAddress = clean.split(":", 1)[-1].strip()
+            value = clean.split(":", 1)[-1].strip() if ":" in clean else ""
+            if value:
+                invoice.buyerAddress = value
+            else:
+                # Address is on the next line(s)
+                pending_field = "buyerAddress"
+            matched = True
 
         # PHONE (FIX TEL + FAX)
         elif "điện thoại" in low or "tel" in low:
             phone = extract_phone(clean)
             if phone:
                 invoice.buyerPhoneNumber = phone
+            pending_field = None
+            matched = True
 
         # BANK 
         elif "số tài khoản" in low or "account no" in low or "ac no" in low:
@@ -780,6 +862,8 @@ def parse_buyer(block: List[str], invoice: Invoice):
                 m_bank = re.search(r"ngân hàng[:\s]*([^\n]+?)(?:\s*-\s*Chi nhánh|\s*$)", clean, re.I)
                 if m_bank:
                     invoice.buyerBank = m_bank.group(1).strip(" :-")
+            pending_field = None
+            matched = True
 
         # PAYMENT METHOD (Added check for mixed lines or standalone)
         # Check this INDEPENDENTLY of elif chain because it might share line with Phone
@@ -795,6 +879,8 @@ def parse_buyer(block: List[str], invoice: Invoice):
                  # Further cleanup if it starts with "(Payment method)"
                  pm_val = re.sub(r"^\(?Payment method\)?", "", pm_val, flags=re.I).strip(" :")
                  invoice.paymentMethod = pm_val
+             pending_field = None
+             matched = True
 
 
 
@@ -803,6 +889,25 @@ def parse_buyer(block: List[str], invoice: Invoice):
             value = clean.split(":", 1)[-1].strip()
             if value:
                 invoice.currency = value
+            pending_field = None
+            matched = True
+
+        # ===== CONTINUATION LINE (for multi-line values like address) =====
+        if not matched and pending_field and clean:
+            # Stop continuation if this line looks like a new section/label
+            is_section = any(k in low for k in ["reason for", "material", "description",
+                                                 "\u51fa\u53e3\u539f\u56e0", "\u6750\u8d28", "country of",
+                                                 "bank information", "payment term",
+                                                 "delivery time", "weight"])
+            if is_section:
+                pending_field = None
+            else:
+                current_val = getattr(invoice, pending_field, None)
+                if current_val:
+                    setattr(invoice, pending_field, current_val + " " + clean)
+                else:
+                    setattr(invoice, pending_field, clean)
+                continue
 
         # ===== UNLABELED VALUES (for form-based format like Sample 6) =====
         elif ":" not in clean:
@@ -1150,6 +1255,9 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
     
     # ===== INVOICE DATE (fallback) =====
     if not invoice.invoiceDate:
+        months = {'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 'may': '05', 'jun': '06',
+                  'jul': '07', 'aug': '08', 'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'}
+
         # Pattern 1: Date: 2025/12/1 or Date: 2025-12-01
         m = re.search(r'[Dd]ate[:\s]+(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})', raw_text)
         if m:
@@ -1157,41 +1265,57 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
         
         # Pattern 2: DEC. 01, 2025 or Dec 1, 2025 or December 01, 2025
         if not invoice.invoiceDate:
-            months = {'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 'may': '05', 'jun': '06',
-                      'jul': '07', 'aug': '08', 'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'}
             m = re.search(r'([A-Za-z]{3,9})\.?\s*(\d{1,2}),?\s*(\d{4})', raw_text)
             if m:
                 month_abbr = m.group(1).lower()[:3]
                 if month_abbr in months:
                     invoice.invoiceDate = f"{m.group(2).zfill(2)}/{months[month_abbr]}/{m.group(3)}"
+        
+        # Pattern 3: Date: 27-Mar-25 or 27-Dec-2025 (dd-Mon-yy or dd-Mon-yyyy)
+        if not invoice.invoiceDate:
+            m = re.search(r'[Dd]ate[:\s]+(\d{1,2})[\-/]([A-Za-z]{3,9})[\-/](\d{2,4})', raw_text)
+            if m:
+                day = m.group(1).zfill(2)
+                month_abbr = m.group(2).lower()[:3]
+                year = m.group(3)
+                if len(year) == 2:
+                    year = '20' + year  # 25 → 2025
+                if month_abbr in months:
+                    invoice.invoiceDate = f"{day}/{months[month_abbr]}/{year}"
     
     # ===== CURRENCY (fallback from whole raw_text) =====
-    # Priority: "Đơn vị tính: VND" > Other patterns
-    # Do NOT overwrite VND if already set
+    # Priority: "Đơn vị tính: VND" > $ signs > explicit codes
     
     # Pattern 1: Explicit "Đơn vị tính: VND" in table (HIGHEST PRIORITY)
     if re.search(r'[Đđ]ơn\s*vị\s*tính[^:]*:\s*VN[DĐ]', raw_text, re.I):
         invoice.currency = "VND"
-    # Only check EUR/USD if currency is not set
+    # Pattern 2: Check for $ signs (strong indicator of USD)
+    elif raw_text.count('$') >= 3:  # Multiple $ signs → clearly USD
+        invoice.currency = "USD"
+    # Pattern 3: Explicit currency codes
     elif not invoice.currency:
         if re.search(r'\(EURO\)|EUR|euro|euros', raw_text, re.I):
             invoice.currency = "EUR"
-        elif re.search(r'\b(USD|dollar)\b', raw_text, re.I):  # Use word boundary to avoid matching (USD) in account numbers
+        elif re.search(r'\b(USD|dollar)\b', raw_text, re.I):
             invoice.currency = "USD"
     
-    # ===== INVOICE ID =====
     # ===== INVOICE ID =====
     print(f"DEBUG: Checking InvoiceID. Current val: '{invoice.invoiceID}'")
     if not invoice.invoiceID:
         # Pattern 0: BIÊN BẢN HỦY HÓA ĐƠN format - "Hóa đơn bị hủy: ... số 00000324"
-        # These documents reference the cancelled invoice, not the document number
         m = re.search(r'(?:hóa đơn bị hủy|hoá đơn bị huỷ)[^,\n]*,\s*(?:ký hiệu\s+)?[^,]+,\s*số\s+(\d{5,})', raw_text, re.I)
         if m:
             invoice.invoiceID = m.group(1)
             print(f"DEBUG: Found InvoiceID via BIÊN BẢN HỦY format: '{m.group(1)}'")
         
+        # Pattern 0.5: COMMERCIAL INVOICE - No20250321003 or INVOICE - No.12345
+        if not invoice.invoiceID:
+            m = re.search(r'INVOICE\s*[-–—]\s*No\.?\s*([A-Z0-9]+)', raw_text, re.I)
+            if m:
+                invoice.invoiceID = m.group(1)
+                print(f"DEBUG: Found InvoiceID via COMMERCIAL INVOICE format: '{m.group(1)}'")
+        
         # Pattern 1: Explicit line start "Số: 3" or similar (but NOT "Số biên bản")
-        # Support multiline match just in case raw_text format allows
         if not invoice.invoiceID:
             m = re.search(r'(?:^|\n)(?:Số|So|No\.?)(?!\s*biên bản)\s*(?:\([^)]*\))?\s*[:\s]+\**(\d+)\**', raw_text, re.I)
             if m:
@@ -1226,6 +1350,12 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
         # Pattern 6: Number: IVN2025121 (English format)
         if not invoice.invoiceID:
             m = re.search(r'Number[:\s]+([A-Z]{2,5}\d+|\d+)', raw_text, re.I)
+            if m:
+                invoice.invoiceID = m.group(1)
+        
+        # Pattern 7: Invoice #: 67928 or Invoice#: 67928
+        if not invoice.invoiceID:
+            m = re.search(r'Invoice\s*#[:\s]*(\d+)', raw_text, re.I)
             if m:
                 invoice.invoiceID = m.group(1)
     
@@ -1348,12 +1478,81 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
                 except:
                     pass
         
-        # Pattern 8: Fallback - use invoiceTotalInWord if available
+        # Pattern 10: Total Value(总申报价值): $2,614 or "Total Value: 2614"
+        if not invoice.totalAmount:
+            m = re.search(r'Total\s+Value[^:)]*(?:\([^)]*\))?\s*[:\s]*\$?([\d\.\,]+)', raw_text, re.I)
+            if m:
+                num = m.group(1).replace(',', '')
+                try:
+                    val = float(num)
+                    if val > 0:
+                        invoice.totalAmount = val
+                except:
+                    pass
+        
+        # Pattern 11: Fallback - use invoiceTotalInWord if available
         # Convert Vietnamese words to number (e.g. "Ba trăm bảy mươi triệu" -> 370000000)
         if not invoice.totalAmount and invoice.invoiceTotalInWord:
             converted = vietnamese_words_to_number(invoice.invoiceTotalInWord)
             if converted > 0:
                 invoice.totalAmount = converted
+        
+        # Pattern 12: English - "TOTAL: GBP 32499" or "TOTAL: 32,499" (standalone TOTAL line)
+        if not invoice.totalAmount:
+            m = re.search(r'\bTOTAL\b[:\s]*(?:[A-Z]{3}\s*)?([\d\.\,]+)', raw_text, re.I)
+            if m:
+                num = m.group(1).replace(',', '')
+                try:
+                    val = float(num)
+                    if val > 0:
+                        invoice.totalAmount = val
+                except:
+                    pass
+    
+    # ===== CURRENCY DETECTION (Auto-detect from raw text) =====
+    if not invoice.currency or invoice.currency == "VND":
+        # Check if raw text contains non-VND currency prefixes/codes
+        currency_patterns = [
+            (r'\b(GBP)\s+[\d\.\,]+', 'GBP'),
+            (r'\b(USD)\s+[\d\.\,]+', 'USD'),
+            (r'\b(EUR)\s+[\d\.\,]+', 'EUR'),
+            (r'\b(JPY)\s+[\d\.\,]+', 'JPY'),
+            (r'\b(CNY)\s+[\d\.\,]+', 'CNY'),
+            (r'\b(SGD)\s+[\d\.\,]+', 'SGD'),
+            (r'\b(AUD)\s+[\d\.\,]+', 'AUD'),
+            (r'\b(CAD)\s+[\d\.\,]+', 'CAD'),
+            (r'\b(KRW)\s+[\d\.\,]+', 'KRW'),
+            (r'\b(THB)\s+[\d\.\,]+', 'THB'),
+        ]
+        for pattern, curr in currency_patterns:
+            if re.search(pattern, raw_text, re.I):
+                invoice.currency = curr
+                break
+    
+    # ===== SELLER BANK INFO (fallback from BENEFICIARY section) =====
+    # For commercial invoices where BANK INFORMATION appears outside seller block
+    if not invoice.sellerBankAccountNumber:
+        m = re.search(r"BENEFICIARY'?S?\s*ACCOUNT[:\s]*([0-9]+)", raw_text, re.I)
+        if m:
+            invoice.sellerBankAccountNumber = m.group(1)
+    
+    if not invoice.sellerBank:
+        m = re.search(r"BENEFICIARY'?S?\s*BANK[:\s]*(.+?)(?:\n|$)", raw_text, re.I)
+        if m:
+            invoice.sellerBank = m.group(1).strip()
+    
+    # ===== INVOICE NAME (fallback) =====
+    if not invoice.invoiceName:
+        # Pattern 1: Standalone "INVOICE" or "HÓA ĐƠN GTGT"
+        m = re.search(r'^(INVOICE|HÓA ĐƠN\s*(?:GTGT|GIÁ TRỊ GIA TĂNG)?)\s*$', raw_text, re.I | re.MULTILINE)
+        if m:
+            invoice.invoiceName = m.group(1).strip()
+        
+        # Pattern 2: "COMMERCIAL INVOICE", "PROFORMA INVOICE", "TAX INVOICE"
+        if not invoice.invoiceName:
+            m = re.search(r'(COMMERCIAL\s+INVOICE|PROFORMA\s+INVOICE|TAX\s+INVOICE)', raw_text, re.I)
+            if m:
+                invoice.invoiceName = m.group(1).strip().upper()
     
     # ===== SELLER NAME (fallback + override) =====
     # Pattern 1: "Đơn vị bán:" hoặc "Đơn vị bán hàng:" - ALWAYS search
@@ -1365,36 +1564,57 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
             # Only override if current value is missing, too short, or truncated (likely from signature)
             if not invoice.sellerName or len(invoice.sellerName) < 20:
                 invoice.sellerName = val
-        
-        # Pattern 2: English - "THE Seller: Company: TLSH SAS"
-        if not invoice.sellerName:
-            m = re.search(r'THE\s+Seller[:\s]*\n?Company[:\s]*([^\n]+)', raw_text, re.I)
+    
+    # Pattern 2: English - "THE Seller: Company: TLSH SAS"
+    if not invoice.sellerName:
+        m = re.search(r'THE\s+Seller[:\s]*\n?Company[:\s]*([^\n]+)', raw_text, re.I)
+        if m:
+            val = m.group(1).strip().strip('*')
+            if val and len(val) > 2:
+                invoice.sellerName = val
+    
+    # Pattern 3: SHIPPER/COMPANY NAME公司名称: → next line is company name
+    if not invoice.sellerName:
+        m = re.search(r'SHIPPER[^\n]*(?:COMPANY\s*NAME|公司名称)[^\n]*[:\s]*\n([^\n]+)', raw_text, re.I)
+        if m:
+            val = m.group(1).strip().strip('*')
+            if val and len(val) > 2:
+                invoice.sellerName = val
+    
+    # Pattern 4: BENEFICIARY: Gunri Precision Hardware Co., Ltd
+    if not invoice.sellerName:
+        m = re.search(r'BENEFICIARY\s*:\s*([^\n]+)', raw_text, re.I)
+        if m:
+            val = m.group(1).strip().strip('*')
+            # Should NOT be "BENEFICIARY'S ACCOUNT" or "BENEFICIARY'S BANK"
+            if val and len(val) > 2 and "account" not in val.lower() and "bank" not in val.lower():
+                invoice.sellerName = val
+    
+    # Pattern 5: Company: at start of seller section
+    if not invoice.sellerName:
+        seller_pos = raw_text.lower().find('the seller')
+        if seller_pos > 0:
+            seller_text = raw_text[seller_pos:seller_pos+300]
+            m = re.search(r'Company[:\s]*([^\n]+)', seller_text, re.I)
             if m:
                 val = m.group(1).strip().strip('*')
                 if val and len(val) > 2:
                     invoice.sellerName = val
-        
-        # Pattern 3: Company: at start of seller section
-        if not invoice.sellerName:
-            # Look for Company: after THE Seller marker
-            seller_pos = raw_text.lower().find('the seller')
-            if seller_pos > 0:
-                seller_text = raw_text[seller_pos:seller_pos+300]
-                m = re.search(r'Company[:\s]*([^\n]+)', seller_text, re.I)
-                if m:
-                    val = m.group(1).strip().strip('*')
-                    if val and len(val) > 2:
-                        invoice.sellerName = val
-        
-        # Pattern 4: "Ký bởi:" signature section (final fallback)
-        # In Vietnamese invoices, the signature "Ký bởi: CÔNG TY..." indicates the Seller
-        if not invoice.sellerName:
-            m = re.search(r'[Kk]ý\s+bởi[:\s]*([^\n]+)', raw_text)
-            if m:
-                val = m.group(1).strip().strip('*')
-                # Validate: should contain company keywords
-                if val and len(val) > 5 and any(company in val.upper() for company in ['CÔNG TY', 'CHI NHÁNH', 'CORPORATION', 'CO.']):
-                    invoice.sellerName = val
+    
+    # Pattern 6: "Ký bởi:" signature section (final fallback)
+    if not invoice.sellerName:
+        m = re.search(r'[Kk]ý\s+bởi[:\s]*([^\n]+)', raw_text)
+        if m:
+            val = m.group(1).strip().strip('*')
+            if val and len(val) > 5 and any(company in val.upper() for company in ['CÔNG TY', 'CHI NHÁNH', 'CORPORATION', 'CO.']):
+                invoice.sellerName = val
+    
+    # SANITIZE: If sellerName is a section header label (not actual company), clear it
+    if invoice.sellerName:
+        seller_lower = invoice.sellerName.lower()
+        header_labels = ["information", "寄货人", "资料", "收货人", "shipper", "consignee"]
+        if any(lbl in seller_lower for lbl in header_labels):
+            invoice.sellerName = None
     
     # ===== SELLER TAX CODE (fallback) =====
     if not invoice.sellerTaxCode:
@@ -1441,9 +1661,7 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
             m = re.search(r'(?:[Hh]ọ\s*tên\s*người\s*mua|[Nn]gười\s*mua\s*hàng|[Tt]ên\s*người\s*mua|[Bb]uyer)[^:]*:\s*([^\n]+)', raw_text)
             if m:
                 val = m.group(1).strip().strip('*')
-                # Exclude signature-related values
                 if val and len(val) > 3 and not re.match(r'^\*+$', val):
-                    # Exclude if this looks like signature context (Seller info)
                     if not any(sig in val.lower() for sig in ['ký bởi', 'signed', 'signature', 'người bán']):
                         invoice.buyerName = val
         
@@ -1453,6 +1671,30 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
             if m:
                 val = m.group(1).strip().strip('*')
                 if val and len(val) > 3:
+                    invoice.buyerName = val
+        
+        # Pattern 4: "Bill to: Pioneer Route Materials" (English invoices)
+        if not invoice.buyerName:
+            m = re.search(r'[Bb]ill\s+to[:\s]*([^\n]+)', raw_text)
+            if m:
+                val = m.group(1).strip().strip('*')
+                if val and len(val) > 3:
+                    invoice.buyerName = val
+        
+        # Pattern 5: "Customer: Pioneer Route Materials" (English invoices)
+        if not invoice.buyerName:
+            m = re.search(r'[Cc]ustomer[:\s]*([^\n]+)', raw_text)
+            if m:
+                val = m.group(1).strip().strip('*')
+                if val and len(val) > 3 and 'address' not in val.lower():
+                    invoice.buyerName = val
+        
+        # Pattern 6: CONSIGNEE/COMPANY NAME公司名称: → next line is buyer name
+        if not invoice.buyerName:
+            m = re.search(r'CONSIGNEE[^\n]*(?:COMPANY\s*NAME|公司名称)[^\n]*[:\s]*\n([^\n]+)', raw_text, re.I)
+            if m:
+                val = m.group(1).strip().strip('*')
+                if val and len(val) > 2:
                     invoice.buyerName = val
     
     # ===== BUYER TAX CODE (fallback) =====
@@ -1479,7 +1721,8 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
             r'[Cc]ộng\s*tiền\s*hàng[^:]*:\s*([\d\.\,]+)',
             r'[Tt]iền\s*(?:hàng\s*)?chưa\s*thuế[^:]*:\s*([\d\.\,]+)',
             r'[Tt]hành\s*tiền\s*chưa\s*thuế[^:]*:\s*([\d\.\,]+)',
-            r'[Ss]ubtotal[^:]*:\s*([\d\.\,]+)',
+            r'[Ss]ubtotal[^:]*:\s*(?:[A-Z]{3}\s*)?([\d\.\,]+)',  # Support "Subtotal: GBP 29,545"
+            r'[Ii]nvoice\s*[Ss]ubtotal[^:]*:\s*(?:[A-Z]{3}\s*)?([\d\.\,]+)',  # Invoice Subtotal: GBP 29,545
         ]
         for pattern in patterns:
             m = re.search(pattern, raw_text)
@@ -1496,6 +1739,7 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
             r'[Tt]huế\s*(?:GTGT|giá\s*trị\s*gia\s*tăng)[^:]*:\s*([\d\.\,]+)',
             r'[Tt]iền\s*thuế[^:]*:\s*([\d\.\,]+)',
             r'VAT[^:]*:\s*([\d\.\,]+)',
+            r'[Ss]ales\s*[Tt]ax[^:]*:\s*(?:[A-Z]{3}\s*)?([\d\.\,]+)',  # Sales Tax: GBP 2,954
         ]
         for pattern in patterns:
             m = re.search(pattern, raw_text)
@@ -1512,6 +1756,7 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
             r'[Tt]huế\s*suất[^:]*:\s*(\d{1,2})\s*%',
             r'VAT[^:]*:\s*(\d{1,2})\s*%',
             r'\((\d{1,2})%\s*(?:GTGT|VAT)\)',
+            r'[Tt]ax\s*[Rr]ate[^:]*:\s*(\d{1,2})\s*%',   # Tax Rate: 10%
         ]
         for pattern in patterns:
             m = re.search(pattern, raw_text)
@@ -1592,8 +1837,10 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
     GARBAGE_KEYWORDS = [
         "thời điểm", "thuế suất", "tổng cộng", "cộng tiền", "thành tiền trước thuế",
         "không kê khai", "không chịu thuế", "tiền thuế", "số tiền viết bằng chữ",
-        "người mua", "người bán", "chữ ký", "signature"
+        "người mua", "người bán", "chữ ký", "signature",
     ]
+    # Also filter items where productName is just a currency code
+    CURRENCY_CODES = {"usd", "eur", "gbp", "vnd", "jpy", "cny"}
     
     if invoice.itemList:
         cleaned_items = []
@@ -1605,8 +1852,11 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
             name_lower = (item.productName or "").lower()
             has_garbage_keyword = any(kw in name_lower for kw in GARBAGE_KEYWORDS)
             
+            # Check if productName is just a currency code (e.g. "USD" from pipe table)
+            is_currency = name_lower.strip() in CURRENCY_CODES
+            
             # Skip if garbage
-            if has_no_data or has_garbage_keyword:
+            if has_no_data or has_garbage_keyword or is_currency:
                 # print(f"DEBUG: Skipping garbage item: {item.productName}")
                 continue
             
@@ -1628,17 +1878,20 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
          # Scan table and total blocks for numbers
          scan_lines = blocks["table"] + blocks["total"]
          for line in scan_lines:
-             # EXCLUDE lines with transaction codes (mã GD, mã giao dịch)
+             # EXCLUDE lines with transaction codes, phone numbers, postal codes
              low = line.lower()
-             if "mã gd" in low or "mã giao dịch" in low:
+             if any(k in low for k in ["mã gd", "mã giao dịch", "tel", "phone", "fax",
+                                        "(+84)", "(+86)", "(+1)", "swift",
+                                        "account", "tài khoản", "postal",
+                                        "zip", "100000", "242000"]):
                  continue
              
              nums = re.findall(r'[\d\.\,]+', line)
              for n in nums:
                  val = safe_parse_float(n)
-                 # Filter: > 1000 (minimum amount) and < 100 billion (reasonable upper bound)
-                 # Transaction codes are often 10+ digits (> 1 billion)
-                 if val and val > 1000 and val < 100_000_000_000:
+                 # Filter: > 1000 (minimum amount) and < 10 million (reasonable upper bound for fallback)
+                 # Tightened from 100B to 10M to exclude phone numbers (9+ digits)
+                 if val and val > 1000 and val < 10_000_000:
                      all_nums.append(val)
          
          if all_nums:

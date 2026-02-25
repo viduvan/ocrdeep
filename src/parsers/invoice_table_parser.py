@@ -19,6 +19,11 @@ def safe_parse_float(value: str) -> Optional[float]:
     if not v:
         return None
 
+    # Strip common currency symbols before parsing
+    v = v.lstrip('$€£¥')
+    if not v:
+        return None
+
     # If both . and , exist, detect which is thousand separator vs decimal
     # Vietnamese format: 1.234.567,89 (. = thousand, , = decimal)
     # English format: 1,234,567.89 (, = thousand, . = decimal)
@@ -127,15 +132,17 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
     # tax_amt must be checked BEFORE amount because "Tax Amount" contains "amount"
     field_keywords = {
         "stt": ["stt", "no.", "no"],
-        "name": ["tên hàng", "description", "tên sản phẩm", "diễn giải", "hàng hóa", "nhãn hiệu", "quy cách", "phẩm chất"],
+        "name": ["tên hàng", "description", "tên sản phẩm", "diễn giải", "hàng hóa", "nhãn hiệu", "quy cách", "phẩm chất",
+                 "specifications", "规格"],  # CN: 规格 = Specifications
         "code": ["mã số", "mã hàng", "mã sp", "product code", "code"],
-        "price": ["đơn giá", "price", "unit price"],
+        "price": ["đơn giá", "unit price", "单价", "unit value"],  # CN: 单价 = Unit Price
         "tax_amt": ["tiền thuế", "tax amount", "vat amount"],  # BEFORE amount!
-        "amount": ["thành tiền", "amount", "trị giá"],  # After tax_amt
+        "amount": ["thành tiền", "amount", "trị giá", "price", "总计", "total value"],  # CN: 总计 = Total
         "unit": ["đvt", "đơn vị", "unit"],
-        "qty": ["số lượng", "sl", "quantity", "qty"],
+        "qty": ["số lượng", "sl", "quantity", "qty", "数量", "no.of unit"],  # CN: 数量 = Quantity
         "tax_rate": ["thuế suất", "tax rate", "vat rate"],
-        "payment": ["thành tiền sau thuế", "cộng tiền thanh toán", "tổng cộng"] # Sometimes distinct
+        "payment": ["thành tiền sau thuế", "cộng tiền thanh toán", "tổng cộng"],  # Sometimes distinct
+        "currency_col": ["currency", "货号"],  # CN: 货号 = Currency column (skip this data)
     }
 
     # 1. Identify headers to map columns
