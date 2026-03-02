@@ -240,6 +240,10 @@ async def detect_single_invoice_ocr(
                 form_no = (invoice.invoiceFormNo or "").lower()
                 if not invoice.invoiceFormNo or "điều" in form_no or "mẫu" in form_no:
                     missing_fields.append("invoiceFormNo")
+                if not invoice.sellerName:
+                    missing_fields.append("sellerName")
+                if not invoice.buyerName:
+                    missing_fields.append("buyerName")
                 
                 if missing_fields:
                     print(f"Page {actual_page_idx + 1}: Missing {missing_fields} - Triggering Zoom-in...")
@@ -334,6 +338,11 @@ async def detect_single_invoice_ocr(
            invoice.invoiceName.strip().startswith("(") or \
            "BẢN THỂ HIỆN" in name_upper or "BẢN SAO" in name_upper:
              missing_fields.append("invoiceName (missing/suspicious)")
+        
+        if not invoice.sellerName:
+            missing_fields.append("sellerName")
+        if not invoice.buyerName:
+            missing_fields.append("buyerName")
 
         if missing_fields:
             print(f"Missing header fields {missing_fields} - Triggering Zoom-in Pass...")
@@ -528,6 +537,10 @@ async def detect_invoice_ocr(
                     form_no = (invoice.invoiceFormNo or "").lower()
                     if not invoice.invoiceFormNo or "điều" in form_no or "mẫu" in form_no:
                         missing_fields.append("invoiceFormNo")
+                    if not invoice.sellerName:
+                        missing_fields.append("sellerName")
+                    if not invoice.buyerName:
+                        missing_fields.append("buyerName")
                     
                     if missing_fields:
                         # Use 1-indexed for display, but actual_page_idx is 0-indexed for function call

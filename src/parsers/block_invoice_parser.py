@@ -310,7 +310,8 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
         # ===== TOTAL (High Priority) =====
         # Check this BEFORE Table block to ensure summary rows with pipes (e.g. |Tổng tiền:|) switch to Total
         if seen_table and any(k in l for k in [
-            "tổng cộng", "tổng tiền", "số tiền viết bằng chữ", "cộng tiền hàng", "total amount", "khách hàng đã thanh toán", "thuế suất"
+            "tổng cộng", "tổng tiền", "số tiền viết bằng chữ", "cộng tiền hàng", "total amount", "khách hàng đã thanh toán", "thuế suất",
+            "total unit", "total value", "total qty", "grand total"
         ]):
             current = "total"
             
@@ -1111,7 +1112,7 @@ def parse_total(block: List[str], invoice: Invoice):
                                 invoice.totalAmount = total_cand # Ensure consistency
         
         # Also try Total payment pattern
-        if "total payment" in l and not invoice.totalAmount:
+        if any(k in l for k in ["total payment", "total value", "grand total", "net amount"]) and not invoice.totalAmount:
             num = re.sub(r"[^\d]", "", line)
             if num:
                 invoice.totalAmount = float(num)
@@ -1146,9 +1147,9 @@ def parse_total(block: List[str], invoice: Invoice):
         # Thuế suất (VAT Rate)
         # Scan for "Thuế suất", "VAT Rate", "Chịu thuế", "Tiền thuế GTGT" + "%"
         if (any(k in l for k in ["thuế suất", "vat rate", "chịu thuế", "thuế gtgt"]) and "%" in l):
-             m = re.search(r"(\d+)%", line)
+             m = re.search(r"(\d+%)", line)
              if m:
-                 val = m.group(1)
+                 val = m.group(1)  # e.g. "10%"
                  # Heuristic: Prioritize lines that actually have MONEY values (populatd tax rows)
                  # e.g. "Tổng tiền chịu thuế 8%: 14.000.000" vs "Tổng tiền chịu thuế 10%:" (empty)
                  has_value = False
@@ -1283,21 +1284,69 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
                 if month_abbr in months:
                     invoice.invoiceDate = f"{day}/{months[month_abbr]}/{year}"
     
-    # ===== CURRENCY (fallback from whole raw_text) =====
-    # Priority: "Đơn vị tính: VND" > $ signs > explicit codes
-    
-    # Pattern 1: Explicit "Đơn vị tính: VND" in table (HIGHEST PRIORITY)
-    if re.search(r'[Đđ]ơn\s*vị\s*tính[^:]*:\s*VN[DĐ]', raw_text, re.I):
-        invoice.currency = "VND"
-    # Pattern 2: Check for $ signs (strong indicator of USD)
-    elif raw_text.count('$') >= 3:  # Multiple $ signs → clearly USD
-        invoice.currency = "USD"
-    # Pattern 3: Explicit currency codes
-    elif not invoice.currency:
-        if re.search(r'\(EURO\)|EUR|euro|euros', raw_text, re.I):
-            invoice.currency = "EUR"
-        elif re.search(r'\b(USD|dollar)\b', raw_text, re.I):
-            invoice.currency = "USD"
+    # ===== CURRENCY — detect from invoice text, do NOT default to VND =====
+    # Strategy: scan for explicit currency signals with confidence scoring.
+    # Only assign VND if no other currency is found AND the invoice is clearly VN.
+    if not invoice.currency:
+        text_upper = raw_text.upper()
+
+        # ----- Confidence scoring per currency -----
+        scores = {}
+
+        # USD signals
+        usd_score = 0
+        usd_score += raw_text.count('$') * 3          # $ symbol (strong)
+        usd_score += raw_text.count('USD$') * 2
+        if re.search(r'\bUSD\b', text_upper): usd_score += 5
+        if re.search(r'\(USD\$?\)', text_upper): usd_score += 4
+        if re.search(r'U\.S\.?\s*DOLLAR', text_upper): usd_score += 5
+        if re.search(r'DOLLAR', text_upper): usd_score += 2
+        if usd_score > 0:
+            scores['USD'] = usd_score
+
+        # EUR signals
+        eur_score = 0
+        eur_score += raw_text.count('€') * 3
+        if re.search(r'\bEUR\b', text_upper): eur_score += 5
+        if re.search(r'\(EURO\)', text_upper): eur_score += 4
+        if re.search(r'\bEURO\b', text_upper): eur_score += 3
+        if eur_score > 0:
+            scores['EUR'] = eur_score
+
+        # CNY / RMB signals
+        cny_score = 0
+        cny_score += raw_text.count('¥') * 3
+        if re.search(r'\bCNY\b|\bRMB\b', text_upper): cny_score += 5
+        if re.search(r'人民币', raw_text): cny_score += 5
+        if cny_score > 0:
+            scores['CNY'] = cny_score
+
+        # GBP signals
+        gbp_score = 0
+        gbp_score += raw_text.count('£') * 3
+        if re.search(r'\bGBP\b', text_upper): gbp_score += 5
+        if gbp_score > 0:
+            scores['GBP'] = gbp_score
+
+        # JPY signals
+        jpy_score = 0
+        if re.search(r'\bJPY\b', text_upper): jpy_score += 5
+        if jpy_score > 0:
+            scores['JPY'] = jpy_score
+
+        # VND signals (explicit label only — do NOT infer from absence)
+        vnd_score = 0
+        if re.search(r'[Đđ]ơn\s*vị\s*tính[^:]*:\s*VN[DĐ]', raw_text, re.I): vnd_score += 10
+        if re.search(r'\bVN[DĐ]\b', text_upper): vnd_score += 3
+        if re.search(r'đồng\b', raw_text, re.I): vnd_score += 2
+        if re.search(r'nghìn|triệu|tỷ', raw_text, re.I): vnd_score += 1
+        if vnd_score > 0:
+            scores['VND'] = vnd_score
+
+        if scores:
+            # Pick the currency with the highest confidence score
+            invoice.currency = max(scores, key=lambda c: scores[c])
+        # If no signal found → leave currency as None (do not force VND)
     
     # ===== INVOICE ID =====
     print(f"DEBUG: Checking InvoiceID. Current val: '{invoice.invoiceID}'")
