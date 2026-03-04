@@ -2,7 +2,7 @@ import re
 from typing import List, Dict
 from src.schemas.invoice import Invoice
 from src.schemas.invoice_item import InvoiceItem
-from src.parsers.invoice_table_parser import parse_items_from_table
+from src.parsers.invoice_table_parser import parse_items_from_table, safe_parse_float
 from src.utils.text_extractors import extract_phone
 
 
@@ -140,6 +140,10 @@ def number_to_vietnamese_words(number: float) -> str:
     
     number = int(number)
     
+    # Guard: số quá lớn (> 999 tỷ) → likely misparse, skip
+    if number > 999_999_999_999:
+        return ""
+    
     # Digit words
     digits = ['không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín']
     
@@ -220,28 +224,109 @@ def number_to_vietnamese_words(number: float) -> str:
     return result
 
 
+def number_to_english_words(number: float) -> str:
+    """
+    Convert numeric value to English number words.
+    Example: 1234.56 -> "One thousand two hundred thirty-four and fifty-six cents"
+    """
+    if not number or number <= 0:
+        return ""
+
+    ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+            "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
+    tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+    thousands = ["", "thousand", "million", "billion", "trillion"]
+
+    def convert_to_words(n: int) -> str:
+        if n == 0:
+            return ""
+        elif n < 20:
+            return ones[n]
+        elif n < 100:
+            return tens[n // 10] + (("-" + ones[n % 10]) if n % 10 != 0 else "")
+        elif n < 1000:
+            return ones[n // 100] + " hundred" + ((" and " + convert_to_words(n % 100)) if n % 100 != 0 else "")
+        else:
+            for i, unit in enumerate(thousands):
+                if i == 0: continue
+                if n < 1000**(i+1):
+                    return convert_to_words(n // 1000**i) + " " + unit + ((" , " + convert_to_words(n % 1000**i)) if n % 1000**i != 0 and i > 0 else ((" " + convert_to_words(n % 1000**i)) if n % 1000**i != 0 else ""))
+            return str(n) # Fallback for extremely large numbers
+
+    # Handle large numbers safely
+    if number > 999_999_999_999_999:
+        return ""
+
+    int_part = int(number)
+    decimal_part = int(round((number - int_part) * 100))
+
+    result = convert_to_words(int_part).strip()
+    if result:
+        result = result[0].upper() + result[1:]
+
+    if decimal_part > 0:
+        dec_words = convert_to_words(decimal_part).strip()
+        if result:
+            result += f" and {dec_words} cents"
+        else:
+            result = f"{dec_words[0].upper() + dec_words[1:]} cents"
+    elif result:
+        result += " only"
+
+    return result.replace(" , ", ", ")
+
+
 SELLER_LABEL_KEYS = {
-    "sellerName": ["tên đơn vị bán", "đơn vị bán", "đơn vị bán hàng", "comname", "dơn vị bán hàng", "the seller",
+    "sellerName": ["tên đơn vị bán", "đơn vị bán", "đơn vị bán hàng", "comname", "dơn vị bán hàng",
                    "bên a (bên bán)", "bên bán", "bên a",
-                   "shipper", "beneficiary"],  # EN: SHIPPER/BENEFICIARY = Seller
-    "sellerTaxCode": ["mã số thuế", "tax code", "mst", "vat:"],  # Added MST abbreviation & VAT
-    "sellerAddress": ["địa chỉ", "address"],
-    "sellerPhoneNumber": ["điện thoại", "tel", "số điện thoại"],
+                   # EN Commercial Invoice labels
+                   "the seller", "shipper", "beneficiary", "exporter",
+                   "sender", "sender name", "sender/exporter", "vendor/exporter",
+                   "ship from", "bill from", "shipper/exporter",
+                   "company name", "exporter name", "signatory company",
+                   "shipper name", "from",
+                   # Customs/shipping FROM: section labels
+                   "full name"],
+    "sellerTaxCode": ["mã số thuế", "tax code", "mst", "vat:",
+                      # EN labels
+                      "tax id", "tax id/vat", "vat reg no", "vat reg no.",
+                      "eori", "gst no", "roc"],
+    "sellerAddress": ["địa chỉ", "address",
+                      # EN labels
+                      "street address", "company address", "registered address",
+                      # Customs/shipping labels
+                      "adresse line", "adresse", "address line"],
+    "sellerPhoneNumber": ["điện thoại", "tel", "số điện thoại", "phone", "phone number"],
     "sellerBankAccountNumber": ["số tài khoản", "bankno", "account no", "ac no", "stk",
-                                "beneficiary's account"],  # EN: BENEFICIARY'S ACCOUNT
+                                "beneficiary's account", "account number"],
     "sellerBank": ["ngân hàng", "bankname", "tại ngân hàng", "bank:",
-                   "beneficiary's bank"],  # EN: BENEFICIARY'S BANK
+                   "beneficiary's bank", "bank name"],
     "sellerEmail": ["email"],
 }
 
 BUYER_LABEL_KEYS = {
-    "buyerName": ["tên đơn vị mua", "đơn vị mua", "buyer", "cusname", "tên đơn vị", "company's name", "the buyer", "đơn vị (co. name)", "co. name",
+    "buyerName": ["tên đơn vị mua", "đơn vị mua", "buyer", "cusname", "tên đơn vị",
+                  "company's name", "the buyer", "đơn vị (co. name)", "co. name",
                   "bên b (bên mua)", "bên mua", "bên b",
-                  "consignee"],  # EN: CONSIGNEE = Buyer
-    "buyerTaxCode": ["mã số thuế", "tax code", "mst"],
-    "buyerAddress": ["địa chỉ", "address"],
+                  # EN Commercial Invoice labels
+                  "consignee", "consigned to", "sold to", "bill to",
+                  "ship to", "importer", "importer name",
+                  "recipient", "recipient/ship to",
+                  "customer", "customer name",
+                  "invoice to", "delivery details", "notify party",
+                  # Customs/shipping TO: section labels
+                  "full name", "company name"],
+    "buyerTaxCode": ["mã số thuế", "tax code", "mst",
+                     # EN labels
+                     "importer vat reg no", "importer eori", "tax id"],
+    "buyerAddress": ["địa chỉ", "address",
+                     # EN labels
+                     "delivery address", "ship-to address", "shipping address",
+                     "ship to add",
+                     # Customs/shipping labels
+                     "adresse line", "adresse", "address line"],
     "buyerEmail": ["email"],
-    "buyerPhoneNumber": ["điện thoại", "tel", "số điện thoại"],
+    "buyerPhoneNumber": ["điện thoại", "tel", "số điện thoại", "phone", "phone number"],
 }
 
 
@@ -307,16 +392,97 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
     for line in lines:
         l = line.lower().strip()
 
+        # ===== HEADER (CHỈ KHI GẶP HÓA ĐƠN hoặc PHIẾU) =====
+        # Note: Title may be split across lines like "# HÓA ĐƠN\nGIÁ TRỊ GIA TĂNG"
+        if any(k in l for k in [
+            "hóa đơn",                  # Added: partial match for multi-line titles
+            "phiếu xuất kho",            # Added: Internal transfer slips
+            "phiếu nhập kho",            # Added: Internal receipt slips
+            "phiếu bán hàng",             # Added: Sales slips
+            "biên bản hủy",               # Added: Invoice cancellation documents
+            "biên bản",                   # Added: General documents
+            "vat invoice",
+            "commercial invoice",         # EN: COMMERCIAL INVOICE
+            "proforma invoice",           # EN: PROFORMA INVOICE
+            "pro forma invoice",          # EN: PRO FORMA INVOICE
+            "tax invoice",                # EN: TAX INVOICE
+            "kí hiệu",
+            "ký hiệu",
+            "mẫu số",
+            "invoice no",
+            "inv. no",                    # EN: INV. NO.
+            "invoice number",             # EN: Invoice Number
+            "invoice #",                  # EN: Invoice #
+            "serial no",
+            "s/c no",                     # Added for Case 4
+            "inv. date",                  # Added for Case 4
+        ]):
+            current = "header"
+            seen_header = True
+
+        # ===== SELLER (sau header - format header-first) =====
+        # Khi thấy "đơn vị bán hàng" sau header, chuyển về seller block
+        # HOẶC nếu đang ở Header mà thấy MST/Địa chỉ/SĐT (dấu hiệu seller info) thì chuyển sang Seller
+        # Support English: "THE Seller:", "SHIPPER" and Vietnamese: "BÊN A (Bên bán)"
+        elif any(k in l for k in ["đơn vị bán hàng", "seller:", "the seller:", "bên a (bên bán)", "bên bán)", "bên a:",
+                                    "shipper", "寄货人",
+                                    # EN Commercial Invoice seller section labels
+                                    "exporter:", "exporter details", "sender/exporter",
+                                    "ship from", "bill from", "shipper/exporter",
+                                    "vendor/exporter", "sender name",
+                                    # Customs/shipping invoice FROM: section
+                                    "from:", "from :"]):
+            current = "seller"
+
+        # ===== BUYER (KHÔNG CẦN SEEN_HEADER) =====
+        # Chuyển sang buyer khi gặp keywords chỉ người mua
+        # Support English: "THE Buyer:", "CONSIGNEE" and Vietnamese: "Người mua (Buyer):", "Khách hàng:", "BÊN B (Bên mua)"
+        elif any(k in l for k in [
+            "khách hàng",           # Added: Vietnamese for "Customer"
+            "họ tên người mua",
+            "tên người mua",       # Added: "Tên người mua:"
+            "người mua hàng",
+            "người mua",
+            "buyer:",
+            "the buyer:",
+            "customer's name",
+            "customer:",
+            "bill to",              # Added: English "Bill to:" pattern
+            # Customs/shipping invoice TO: section
+            "to :", "to:",
+            "nhập tại kho",        # Added: For internal transfer slips
+            "bên b (bên mua)",     # Added: For BIÊN BẢN HỦY HÓA ĐƠN
+            "bên mua)",            # Added: Partial match
+            "bên b:",              # Added: For BIÊN BẢN
+            "consignee",           # EN: CONSIGNEE = Buyer
+            "consigned to",        # EN: Consigned to = Buyer
+            "收货人",               # CN: 收货人 = Consignee
+            # EN Commercial Invoice buyer section labels
+            "sold to",
+            "ship to",
+            "importer:",
+            "importer details",
+            "recipient",
+            "invoice to",
+            "notify party",
+            "delivery details",
+            "customer's details",
+        ]):
+            current = "buyer"
+            seen_buyer = True
+
         # ===== TOTAL (High Priority) =====
         # Check this BEFORE Table block to ensure summary rows with pipes (e.g. |Tổng tiền:|) switch to Total
-        if seen_table and any(k in l for k in [
-            "tổng cộng", "tổng tiền", "số tiền viết bằng chữ", "cộng tiền hàng", "total amount", "khách hàng đã thanh toán", "thuế suất",
-            "total unit", "total value", "total qty", "grand total"
-        ]):
+        elif seen_table and (
+            any(k in l for k in [
+                "tông cộng", "tổng tiền", "số tiền viết bằng chữ", "cộng tiền hàng", "total amount", "khách hàng đã thanh toán", "thuế suất",
+                "total unit", "total value", "total qty", "grand total"
+            ]) or (re.search(r'\btotal\b', l) and not l.startswith('|'))
+        ):
             current = "total"
             
         # ===== TABLE (Identify by HTML or Markdown) =====
-        elif "<table>" in l or l.startswith("|"): # Changed to elif
+        elif "<table>" in l or l.startswith("|"):
             # Only switch to table if we are NOT already in total/signature
             if current not in ["total", "signature"]:
                  current = "table"
@@ -338,61 +504,20 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
         ]):
             current = "signature"
 
-        # ===== HEADER (CHỈ KHI GẶP HÓA ĐƠN hoặc PHIẾU) =====
-        # Note: Title may be split across lines like "# HÓA ĐƠN\nGIÁ TRỊ GIA TĂNG"
-        elif any(k in l for k in [
-            "hóa đơn",                  # Added: partial match for multi-line titles
-            "phiếu xuất kho",            # Added: Internal transfer slips
-            "phiếu nhập kho",            # Added: Internal receipt slips
-            "phiếu bán hàng",             # Added: Sales slips
-            "biên bản hủy",               # Added: Invoice cancellation documents
-            "biên bản",                   # Added: General documents
-            "vat invoice",
-            "commercial invoice",         # EN: COMMERCIAL INVOICE
-            "proforma invoice",           # EN: PROFORMA INVOICE
-            "tax invoice",                # EN: TAX INVOICE
-            "kí hiệu",
-            "ký hiệu",
-            "mẫu số",
-            "invoice no",
-            "serial no",
-        ]):
-            current = "header"
-            seen_header = True
-
-        # ===== SELLER (sau header - format header-first) =====
-        # Khi thấy "đơn vị bán hàng" sau header, chuyển về seller block
-        # HOẶC nếu đang ở Header mà thấy MST/Địa chỉ/SĐT (dấu hiệu seller info) thì chuyển sang Seller
-        # Support English: "THE Seller:", "SHIPPER" and Vietnamese: "BÊN A (Bên bán)"
-        elif (any(k in l for k in ["đơn vị bán hàng", "seller:", "the seller:", "bên a (bên bán)", "bên bán)", "bên a:",
-                                    "shipper", "寄货人"]) or 
-              (current == "header" and any(k in l for k in ["mã số thuế", "địa chỉ", "điện thoại", "tax code", "address", "website"]))) \
+        elif (current == "header" and any(k in l for k in ["mã số thuế", "địa chỉ", "điện thoại", "tax code", "address", "website",
+                                                            "phone", "tel:", "fax:", "email"])) \
               and not seen_buyer:
             current = "seller"
-
-        # ===== BUYER (KHÔNG CẦN SEEN_HEADER) =====
-        # Chuyển sang buyer khi gặp keywords chỉ người mua
-        # Support English: "THE Buyer:", "CONSIGNEE" and Vietnamese: "Người mua (Buyer):", "Khách hàng:", "BÊN B (Bên mua)"
-        elif any(k in l for k in [
-            "khách hàng",           # Added: Vietnamese for "Customer"
-            "họ tên người mua",
-            "tên người mua",       # Added: "Tên người mua:"
-            "người mua hàng",
-            "người mua",
-            "buyer:",
-            "the buyer:",
-            "customer's name",
-            "customer:",
-            "bill to",              # Added: English "Bill to:" pattern
-            "nhập tại kho",        # Added: For internal transfer slips
-            "bên b (bên mua)",     # Added: For BIÊN BẢN HỦY HÓA ĐƠN
-            "bên mua)",            # Added: Partial match
-            "bên b:",              # Added: For BIÊN BẢN
-            "consignee",           # EN: CONSIGNEE = Buyer
-            "收货人",               # CN: 收货人 = Consignee
-        ]):
-            current = "buyer"
-            seen_buyer = True
+            # Retroactively move preceding header lines (company name, address) to seller
+            # Move lines back to the last '---' separator or header keyword
+            header_block = blocks.get("header", [])
+            move_lines = []
+            for j in range(len(header_block) - 1, -1, -1):
+                hl = header_block[j].strip().lower()
+                if hl == '---' or hl == '' or any(k in hl for k in ['invoice', 'logo', 'hóa đơn', 'phiếu']):
+                    break
+                move_lines.insert(0, header_block.pop(j))
+            blocks["seller"].extend(move_lines)
 
         # ===== STAY IN BUYER BLOCK if we've seen buyer marker =====
         # Các dòng sau "Họ tên người mua" thuộc buyer block
@@ -535,11 +660,20 @@ def parse_header(block: List[str], invoice: Invoice):
                 m = re.search(r"(?:Số|So|No\.?)[^:]*[:\s]+\*{0,2}(\d+)\*{0,2}", clean_line, re.I)
                 if m:
                     invoice.invoiceID = m.group(1)
-            elif "invoice no" in low and "stt" not in low:
-                m = re.search(r":\s*\*{0,2}([\d]+)\*{0,2}", line)
-                if m:
+            elif ("invoice no" in low or "invoice number" in low) and "stt" not in low:
+                m = re.search(r":\s*\*{0,2}\s*([\d]+)\*{0,2}", line)
+                if m and len(m.group(1)) >= 2:
                     invoice.invoiceID = m.group(1)
-
+                elif m and len(m.group(1)) == 1:
+                    # Single digit likely instruction number — next line has actual ID
+                    invoice._pending_invoice_id = True
+        
+        # Handle pending invoice ID from previous line (value-on-next-line pattern)
+        if getattr(invoice, '_pending_invoice_id', False) and not invoice.invoiceID:
+            val_clean = line.strip().strip('*').strip()
+            if val_clean and re.match(r'^[A-Za-z0-9][\w\-/]+$', val_clean) and len(val_clean) >= 3:
+                invoice.invoiceID = val_clean
+                invoice._pending_invoice_id = False
         # Fallback Seller Name in Header (for plain text header-first layouts)
         # e.g. "CÔNG TY CỔ PHẦN VẬT LIỆU..." appearing in header block
         if not invoice.sellerName and "CÔNG TY" in up:
@@ -560,20 +694,25 @@ def parse_seller(lines: List[str], invoice: Invoice):
         matched = False
         
         # ===== ĐẶC BIỆT: Dòng đầu tiên có thể là tên công ty (không có label) =====
-        # Pattern: "CÔNG TY CỔ PHẦN VẬT LIỆU HOME" ở dòng đầu
         if not first_line_checked:
             first_line_checked = True
-            # Nếu dòng đầu KHÔNG chứa keywords loại trừ và không có dấu ":" → đây là tên seller (fallback)
-            # Relax check: "Chau Huu Materials" doesn't have "CÔNG TY"
-            is_keyword = any(k in low for k in ["hóa đơn", "phiếu", "mẫu số", "ký hiệu", "liên", "date", "ngày", "số:", "no:"])
-            # Also exclude section header labels (SHIPPER INFORMATION, 寄货人资料 etc.)
+            is_keyword = any(k in low for k in ["hóa đơn", "phiếu", "mẫu số", "ký hiệu", "liên", "date", "ngày", "số:", "no:",
+                                                    "invoice", "from:", "from :", "to:", "to :"])
             is_header_label = any(k in low for k in ["information", "寄货人", "资料", "收货人", "shipper", "consignee",
-                                                       "shippes", "country of"])
-            if not is_keyword and not is_header_label and ":" not in clean and len(clean) > 3 and not invoice.sellerName:
-                invoice.sellerName = clean
-                # Mark next unlabeled line as potential address
-                pending_field = "sellerAddress"
-                continue
+                                                       "shippes", "country of", "seller", "exporter"])
+            # Skip table lines (|...|), markdown headers still present, and overly long lines
+            is_table_line = clean.startswith("|")
+            is_too_long = len(clean) > 80
+            if (not is_keyword and not is_header_label and not is_table_line and not is_too_long
+                    and ":" not in clean and len(clean) > 3):
+                if not invoice.sellerName:
+                    invoice.sellerName = clean
+                    pending_field = "sellerAddress"
+                    continue
+                elif clean.strip() == invoice.sellerName.strip():
+                    # First line matches already-set sellerName → address follows
+                    pending_field = "sellerAddress"
+                    continue
 
         # ===== EMAIL (có thể xuất hiện trên cùng dòng với phone) =====
         email = extract_email(clean)
@@ -595,30 +734,47 @@ def parse_seller(lines: List[str], invoice: Invoice):
                     elif "Website" in clean:
                          temp_clean = clean.split("Website")[0]
                     
-                    # FIX: Extract phone AFTER the "điện thoại" or "tel" keyword to avoid MST confusion
+                    # FIX: Extract phone AFTER the label keyword to avoid MST confusion
+                    # First try: "Phone number: +33-6-56-78-90-67" or "Phone number: 0935868885"
+                    if ":" in temp_clean:
+                        phone_val_raw = temp_clean.split(":", 1)[-1].strip().lstrip("- ")
+                        # Match international format: +XX-X-XX-XX-XX-XX or +XX (X) XXXX-XXXX
+                        if re.match(r'\+?[\d\s\-\(\)\.]{7,}$', phone_val_raw):
+                            phone_clean = phone_val_raw.strip()
+                            if len(re.sub(r'[^\d]', '', phone_clean)) >= 7:
+                                invoice.sellerPhoneNumber = phone_clean
+                    
                     # Pattern: "Mã số thuế: 0108921542 Số điện thoại: 0935868885"
-                    phone_match = re.search(r"(?:số điện thoại|điện thoại|tel)[:\s]*(\d{9,11})", temp_clean, re.I)
-                    if phone_match:
-                        invoice.sellerPhoneNumber = phone_match.group(1)
-                    else:
+                    if not invoice.sellerPhoneNumber:
+                        phone_match = re.search(r"(?:số điện thoại|điện thoại|tel)[:\s]*(\d{9,11})", temp_clean, re.I)
+                        if phone_match:
+                            invoice.sellerPhoneNumber = phone_match.group(1)
+                    
+                    if not invoice.sellerPhoneNumber:
                         # Fallback: Try to get any 10-digit number starting with 0
                         m_phone = re.search(r"(?:^|\D)(0\d{9,10})(?:\D|$)", temp_clean)
                         if m_phone:
                             # Make sure it's not the same as tax code
                             if m_phone.group(1) != invoice.sellerTaxCode:
                                 invoice.sellerPhoneNumber = m_phone.group(1)
-                        else:
-                            # Try international format: (84 - 24) 3 747 6666 or (84-24) 37476666
-                            m_intl = re.search(r"\(?\d{2,3}\s*[-\s]\s*\d{2,3}\)?\s*[\d\s]+", temp_clean)
-                            if m_intl:
-                                # Clean up spaces and format
-                                phone_val = m_intl.group(0).strip()
-                                if len(phone_val.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")) >= 8:
-                                    invoice.sellerPhoneNumber = phone_val
-                            else:
-                                phone = extract_phone(temp_clean)
-                                if phone and phone != invoice.sellerTaxCode:
-                                    invoice.sellerPhoneNumber = phone
+                    
+                    if not invoice.sellerPhoneNumber:
+                        # Try international format: (84 - 24) 3 747 6666 or (84-24) 37476666
+                        m_intl = re.search(r"\(?\d{2,3}\s*[-\s]\s*\d{2,3}\)?\s*[\d\s]+", temp_clean)
+                        if m_intl:
+                            phone_val = m_intl.group(0).strip()
+                            if len(phone_val.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")) >= 8:
+                                invoice.sellerPhoneNumber = phone_val
+                    
+                    if not invoice.sellerPhoneNumber:
+                        phone = extract_phone(temp_clean)
+                        if phone and phone != invoice.sellerTaxCode:
+                            invoice.sellerPhoneNumber = phone
+                    
+                    # If nothing was extracted and line has no colon (standalone label "Phone"),
+                    # set pending_field so the next line is treated as the phone value
+                    if not invoice.sellerPhoneNumber and ":" not in clean:
+                        pending_field = "sellerPhoneNumber"
                     
                     matched = True
                     # Continue to next field key, do NOT fall through to NORMAL FIELD
@@ -690,19 +846,26 @@ def parse_seller(lines: List[str], invoice: Invoice):
                     # Also handle standard pattern with single colon
                     value = clean.split(":", 1)[-1].strip()
                     if value and ("công ty" in value.lower() or "doanh nghiệp" in value.lower() or len(value) > 5):
-                        invoice.sellerName = value
+                        if not invoice.sellerName:
+                            invoice.sellerName = value
                         matched = True
                         break
                     elif value:
-                        pending_field = field
+                        if not invoice.sellerName:
+                            pending_field = field
                     matched = True
                     break
 
                 # ===== NORMAL FIELD =====
-                value = clean.split(":", 1)[-1].strip()
-                if value:
-                    setattr(invoice, field, value)
+                if ":" in clean:
+                    value = clean.split(":", 1)[-1].strip()
+                    if value:
+                        setattr(invoice, field, value)
+                    else:
+                        pending_field = field
                 else:
+                    # No colon: this is a standalone label (e.g. "Address" on its own line)
+                    # The value will be on the next line
                     pending_field = field
 
                 matched = True
@@ -710,8 +873,38 @@ def parse_seller(lines: List[str], invoice: Invoice):
 
         # ===== CONTINUATION LINE =====
         if not matched and pending_field and clean:
-            setattr(invoice, pending_field, clean)
-            pending_field = None
+            # Stop at standalone labels (no colon) - re-match for new field
+            _seller_standalone_labels = {'phone', 'email', 'tel', 'fax', 'contact person', 'address',
+                                         'company name', 'full name', 'phone number', 'adresse',
+                                         'invoice', 'bill', 'receipt', 'commercial invoice'}
+            if low.strip('- ') in _seller_standalone_labels:
+                # This line IS a new label — find which field it maps to
+                new_field = None
+                for f2, keys2 in SELLER_LABEL_KEYS.items():
+                    if any(k in low for k in keys2):
+                        new_field = f2
+                        break
+                pending_field = new_field  # Set new pending, or None if no match
+                matched = True
+            else:
+                current_val = getattr(invoice, pending_field, None) or ""
+                # If this line looks like email/phone, don't append to address
+                _is_email_phone = ('@' in clean or 'email' in low or '.com' in low or '.org' in low
+                                   or re.match(r'^[\[\(]?\s*(?:sender|client)?\.?email', low))
+                if _is_email_phone and 'Address' in pending_field:
+                    # Set as sellerEmail instead of appending to address
+                    if not invoice.sellerEmail and '@' in clean:
+                        invoice.sellerEmail = clean
+                    pending_field = None
+                    matched = True
+                elif current_val:
+                    setattr(invoice, pending_field, current_val.rstrip(', ').rstrip(',') + ", " + clean)
+                else:
+                    setattr(invoice, pending_field, clean)
+                # For address fields, keep pending_field to allow multi-line address
+                if not matched and "Address" not in pending_field:
+                    pending_field = None
+                matched = True
 
         # ===== IGNORE FOOTER GARBAGE IN OPPORTUNISTIC FILLING (Context: unlabeled lines) ===== 
         # Skip lines that look like software signatures, lookup instructions, OR digital signatures
@@ -785,8 +978,13 @@ def parse_buyer(block: List[str], invoice: Invoice):
             "bên mua)",         # Partial match
             "bên b:",           # Direct match
             "consignee",        # EN: CONSIGNEE = Buyer
+            "sold to",          # EN: SOLD TO = Buyer
+            "delivery details",  # EN: Delivery Details section
+            "customer's details",  # EN: Customer's Details section
+            "customer:",        # EN: Customer: label
             "company name",     # EN: COMPANY NAME
-        ]):
+            "full name",        # Customs/shipping: Full Name
+        ]) or low.strip() == "to:":
             pending_field = None
             # Special handling for BÊN B pattern - extract after last colon
             if "bên b" in low or "bên mua" in low:
@@ -798,17 +996,22 @@ def parse_buyer(block: List[str], invoice: Invoice):
                         matched = True
                         continue
             
-            # For CONSIGNEE/COMPANY NAME label: value is likely on the NEXT line
-            if "company name" in low or "consignee" in low:
+            # For CONSIGNEE/COMPANY NAME/FULL NAME label: value is likely on the NEXT line or after colon
+            if any(k in low for k in ["company name", "consignee", "full name",
+                                        "delivery details", "customer's details", "customer:"]):
                 # Check if there's a value after colon
                 if ":" in clean:
                     value = clean.split(":", 1)[-1].strip()
                     if value and len(value) > 3:
-                        invoice.buyerName = value
+                        if not invoice.buyerName:
+                            invoice.buyerName = value
                     else:
-                        pending_field = "buyerName"
+                        if not invoice.buyerName:
+                            pending_field = "buyerName"
                 else:
-                    pending_field = "buyerName"
+                    # Only set pending if buyerName is not already set
+                    if not invoice.buyerName:
+                        pending_field = "buyerName"
                 matched = True
                 continue
             
@@ -825,6 +1028,25 @@ def parse_buyer(block: List[str], invoice: Invoice):
                 pending_field = "buyerName"
             matched = True
 
+        # IMPORTER overrides CONSIGNEE — importer is usually the actual buyer
+        # But only match "Importer:", "Importer Name:", NOT "Importer Number:", "Importer EORI:", "Importer VAT:"
+        elif re.match(r'^\s*importer\s*(?:name\s*)?:', low) or low.strip() == 'importer':
+            if ":" in clean:
+                value = clean.split(":", 1)[-1].strip()
+                if value and len(value) > 3:
+                    invoice.buyerName = value
+                    invoice.buyerAddress = None  # Clear consignee address
+                else:
+                    # Clear existing to allow override from next line
+                    invoice.buyerName = None
+                    invoice.buyerAddress = None
+                    pending_field = "buyerName"
+            else:
+                invoice.buyerName = None
+                invoice.buyerAddress = None
+                pending_field = "buyerName"
+            matched = True
+
         #TAX CODE - support MST abbreviation
         elif "mã số thuế" in low or "tax code" in low or "mst" in low:
             m = re.search(r"(\d{10,14}(-\d+)?)", clean)
@@ -833,21 +1055,42 @@ def parse_buyer(block: List[str], invoice: Invoice):
             pending_field = None
             matched = True
 
-        # ADDRESS (including "Nhập tại kho" for internal transfer slips)
-        elif "địa chỉ" in low or "address" in low or "nhập tại kho" in low:
+        # ADDRESS - "Ship To Add:" or "Ship To Address:" shortcuts
+        elif any(k in low for k in ["ship to add", "ship to address", "deliver to address"]):
             value = clean.split(":", 1)[-1].strip() if ":" in clean else ""
-            if value:
+            if value and not invoice.buyerAddress:
                 invoice.buyerAddress = value
-            else:
+            elif not value and not invoice.buyerAddress:
+                pending_field = "buyerAddress"
+            matched = True
+            
+        # ADDRESS (including "Nhập tại kho" for internal transfer slips, "adresse" for French labels)
+        elif "địa chỉ" in low or "address" in low or "nhập tại kho" in low or "adresse" in low:
+            value = clean.split(":", 1)[-1].strip() if ":" in clean else ""
+            if value and not invoice.buyerAddress:
+                invoice.buyerAddress = value
+            elif value and invoice.buyerAddress and len(value) > len(invoice.buyerAddress):
+                # Only overwrite if the new value is more complete
+                invoice.buyerAddress = value
+            elif not value and not invoice.buyerAddress:
                 # Address is on the next line(s)
                 pending_field = "buyerAddress"
             matched = True
 
-        # PHONE (FIX TEL + FAX)
-        elif "điện thoại" in low or "tel" in low:
-            phone = extract_phone(clean)
-            if phone:
-                invoice.buyerPhoneNumber = phone
+        # PHONE (FIX TEL + FAX + Phone number)
+        elif "điện thoại" in low or "tel" in low or "phone number" in low:
+            # First try: extract value after colon for international formats
+            if ":" in clean:
+                phone_val_raw = clean.split(":", 1)[-1].strip().lstrip("- ")
+                if re.match(r'\+?[\d\s\-\(\)\.]{7,}$', phone_val_raw):
+                    phone_clean = phone_val_raw.strip()
+                    if len(re.sub(r'[^\d]', '', phone_clean)) >= 7:
+                        invoice.buyerPhoneNumber = phone_clean
+            # Fallback to extract_phone
+            if not invoice.buyerPhoneNumber:
+                phone = extract_phone(clean)
+                if phone:
+                    invoice.buyerPhoneNumber = phone
             pending_field = None
             matched = True
 
@@ -900,14 +1143,41 @@ def parse_buyer(block: List[str], invoice: Invoice):
                                                  "\u51fa\u53e3\u539f\u56e0", "\u6750\u8d28", "country of",
                                                  "bank information", "payment term",
                                                  "delivery time", "weight"])
-            if is_section:
-                pending_field = None
+            # Stop at standalone labels (no colon) like "Phone", "Email", "Contact Person"
+            _standalone_labels = {'phone', 'email', 'tel', 'fax', 'contact person', 'address',
+                                  'company name', 'full name', 'invoice information',
+                                  'invoice date', 'invoice number', 'origin country',
+                                  'destination country', 'product details', 'financial summary'}
+            is_standalone_label = low.strip('- ') in _standalone_labels
+            # Stop at table lines, lines with colons (new labels), or if field is already long enough
+            is_table_line = clean.startswith("|")
+            has_colon = ":" in clean
+            current_val = getattr(invoice, pending_field, None) or ""
+            # Limit: buyerName max 100 chars, buyerAddress max 150 chars, others max 120
+            max_len = 100 if "Name" in pending_field else (150 if "Address" in pending_field else 120)
+            is_too_long = len(current_val) >= max_len
+            
+            if is_section or is_table_line or has_colon or is_too_long or is_standalone_label:
+                if is_standalone_label:
+                    # Re-match against BUYER_LABEL_KEYS for the new field
+                    new_field = None
+                    for f2, keys2 in BUYER_LABEL_KEYS.items():
+                        if any(k in low for k in keys2):
+                            new_field = f2
+                            break
+                    pending_field = new_field
+                else:
+                    pending_field = None
             else:
-                current_val = getattr(invoice, pending_field, None)
                 if current_val:
-                    setattr(invoice, pending_field, current_val + " " + clean)
+                    # Don't append if the continuation value is the same as what's already set
+                    if current_val.strip() != clean.strip():
+                        setattr(invoice, pending_field, current_val + " " + clean)
                 else:
                     setattr(invoice, pending_field, clean)
+                # After setting buyerName, switch to buyerAddress for following lines
+                if pending_field == "buyerName" and not invoice.buyerAddress:
+                    pending_field = "buyerAddress"
                 continue
 
         # ===== UNLABELED VALUES (for form-based format like Sample 6) =====
@@ -979,7 +1249,6 @@ def parse_table(block: List[str], invoice: Invoice):
         if "tổng cộng" in l and not invoice.totalAmount:
             nums = re.findall(r'[\d\.\,]+', line)
             if nums:
-                 from src.parsers.invoice_table_parser import safe_parse_float
                  val = safe_parse_float(nums[-1])
                  if val and val > 1000:
                      invoice.totalAmount = val
@@ -988,10 +1257,10 @@ def parse_table(block: List[str], invoice: Invoice):
         # Last number is totalAmount (thành tiền sau thuế)
         # Format Viettel: |Cộng tiền hàng hóa, dịch vụ:||||||14.027.784|1.122.216|15.150.000|
         # Last number is totalAmount (thành tiền sau thuế)
-        if ("cộng tiền hàng" in l or "cộng tiền dịch vụ" in l or "tổng tiền" in l or "tổng cộng" in l):
+        if ("cộng tiền hàng" in l or "cộng tiền dịch vụ" in l or "tổng tiền" in l or "tổng cộng" in l
+                or ("exw" in l and not invoice.totalAmount)):
             nums = re.findall(r'[\d\.\,]+', line)
             if nums:
-                 from src.parsers.invoice_table_parser import safe_parse_float
                  parsed_nums = [safe_parse_float(n) for n in nums]
                  parsed_nums = [n for n in parsed_nums if n is not None]
                  
@@ -1047,49 +1316,109 @@ def parse_total(block: List[str], invoice: Invoice):
 
         l = line.lower()
 
+        # ===== SKIP ITEM-DETAIL LINES (not summary rows) =====
+        # These are sub-rows of item table, not total amounts
+        _skip_detail_keywords = [
+            "customs tariff", "country of origin", "batch:", "batch no",
+            "siret", "n°tva", "rcs ", "s.a.s", "iban:", "swift:",
+            "tracking", "fedex", "parcels",
+        ]
+        if any(k in l for k in _skip_detail_keywords):
+            continue
+        
+        # Skip pure date lines (DD.MM.YYYY or DD/MM/YYYY) that might be in pipe rows
+        if re.match(r'^\s*\|?\s*\d{2}[./]\d{2}[./]\d{4}\s*\|?\s*$', line):
+            continue
+        
+        # Skip phone number lines in pipe rows (e.g. "| 02.35.23.19.35 |")
+        if re.match(r'^\s*\|?\s*[\d\s.+()\-]{8,}\s*\|?\s*$', line):
+            continue
+
         # Tổng cộng tiền thanh toán (Total payment) - multiple patterns
         # Pattern 1: "Tổng cộng tiền thanh toán:" or "Total payment:"
         # Pattern 2: Markdown table row "|Tổng cộng:|||...|229.997|" - last number is totalAmount
         
         # FIX: Allow overwriting totalAmount because "Total Payment" is authoritative (Post-Tax)
         # Added "tổng tiền", "cộng tiền" for VETC and Viettel cases
-        if "tổng cộng" in l or "total payment" in l or "tổng tiền" in l or "cộng tiền" in l:
+        if "tổng cộng" in l or "total payment" in l or "tổng tiền" in l or "cộng tiền" in l or ("total" in l and "subtotal" not in l):
+            # Skip weight/package totals — not monetary amounts
+            _weight_kws = ["weight", "gross", "net weight", "package", "pkgs", "carton", "pallet", "tare"]
+            if any(wk in l for wk in _weight_kws):
+                continue
             # Check if markdown table row
             if "|" in line:
-                nums = re.findall(r'[\d\.\,]+', line)
-                if nums:
-                    # Parse last number as totalAmount (cộng tiền thanh toán)
-                    # Use safe_parse_float for Vietnamese format handling
-                    from src.parsers.invoice_table_parser import safe_parse_float
-                    
+                # Extract cells and filter out weight-related values (kg, lb, g, oz, ton)
+                cells = [c.strip() for c in line.split("|") if c.strip()]
+                monetary_nums = []
+                weight_pattern = re.compile(r'\b(?:kg|lb|lbs|g|oz|ton|tons|mt)\b', re.I)
+                for cell in cells:
+                    # Skip cells that contain weight units
+                    if weight_pattern.search(cell):
+                        continue
+                    # Skip cells that are currency symbols only
+                    if re.fullmatch(r'[€$£¥]+', cell.strip()):
+                        continue
+                    # Extract numbers from this cell
+                    cell_nums = re.findall(r'[\d\.\,]+', cell)
+                    for n in cell_nums:
+                        val = safe_parse_float(n)
+                        if val is not None:
+                            monetary_nums.append(val)
+                
+                if monetary_nums:
+                    parsed_nums = monetary_nums
+                else:
+                    # Fallback: use all numbers if no monetary ones found
+                    nums = re.findall(r'[\d\.\,]+', line)
                     parsed_nums = [safe_parse_float(n) for n in nums]
                     parsed_nums = [n for n in parsed_nums if n is not None]
                     
-                    if parsed_nums:
-                        val = parsed_nums[-1]
-                        if val and val > 0:
-                            invoice.totalAmount = val
-                            
-                        # Try to extract Tax and PreTax if 3 numbers exist (PreTax, Tax, Total)
-                        if len(parsed_nums) >= 3:
-                            pre_tax = parsed_nums[-2] # Wait, usually last is Total, 2nd last is Tax?
-                            # Example: |8.333|667|9.000| -> 9000 total, 667 tax, 8333 pretax
-                            # So: [-1]=Total, [-2]=Tax, [-3]=PreTax
-                            
-                            tax_cand = parsed_nums[-2]
-                            pre_cand = parsed_nums[-3]
-                            
-                            
-                            # Verify Summation: Pre + Tax = Total (approx)
-                            if abs((pre_cand + tax_cand) - val) < (val * 0.01) + 10: # 1% tolerance + 10 units
-                                # Force overwrite because this summation is strong evidence
-                                invoice.taxAmount = tax_cand
-                                invoice.preTaxPrice = pre_cand
+                if parsed_nums:
+                    val = parsed_nums[-1]
+                    if val and val > 0:
+                        invoice.totalAmount = val
+                    else:
+                        # If no number on this line, but it's a TOTAL header, look at next line
+                        # This handles: | OTHER | TOTAL | \n | GBP 32499 | |
+                        # We find which index "TOTAL" is at
+                        t_cells = [c.lower().strip() for c in line.split('|')]
+                        total_idx = -1
+                        for i, c in enumerate(t_cells):
+                            if "total" in c:
+                                total_idx = i
+                                break
+                        
+                        if total_idx != -1:
+                            # Look ahead at next line if it exists
+                            current_idx = block.index(line)
+                            if current_idx + 1 < len(block):
+                                next_line = block[current_idx + 1]
+                                if "|" in next_line:
+                                    next_cells = [c.strip() for c in next_line.split('|')]
+                                    if total_idx < len(next_cells):
+                                        num_match = re.search(r'[\d\.\,]+', next_cells[total_idx])
+                                        if num_match:
+                                            val = safe_parse_float(num_match.group(0))
+                                            if val and val > 0:
+                                                invoice.totalAmount = val
+                    
+                    # Try to extract Tax and PreTax if 3 numbers exist (PreTax, Tax, Total)
+                    if len(parsed_nums) >= 3:
+                        # Example: |8.333|667|9.000| -> 9000 total, 667 tax, 8333 pretax
+                        # So: [-1]=Total, [-2]=Tax, [-3]=PreTax
+                        
+                        tax_cand = parsed_nums[-2]
+                        pre_cand = parsed_nums[-3]
+                        
+                        # Verify Summation: Pre + Tax = Total (approx)
+                        if abs((pre_cand + tax_cand) - val) < (val * 0.01) + 10: # 1% tolerance + 10 units
+                            # Force overwrite because this summation is strong evidence
+                            invoice.taxAmount = tax_cand
+                            invoice.preTaxPrice = pre_cand
             else:
                 # Non-table format: "Tổng cộng tiền thanh toán: 123,456" OR "Tổng cộng: 2.314.750  185.180  2.499.930"
                 nums = re.findall(r'[\d\.\,]+', line)
                 if nums:
-                    from src.parsers.invoice_table_parser import safe_parse_float
                     parsed_nums = [safe_parse_float(n) for n in nums]
                     parsed_nums = [n for n in parsed_nums if n is not None and n > 0] # Filter valid numbers
                     
@@ -1119,7 +1448,14 @@ def parse_total(block: List[str], invoice: Invoice):
 
         # Số tiền viết bằng chữ
         if "số tiền viết bằng chữ" in l or "in words" in l:
-            text_val = line.split(":", 1)[-1].strip()
+            # Handle pipe-table format: "| Total in Words | One Hundred... |"
+            if '|' in line:
+                cells = [c.strip() for c in line.split('|') if c.strip()]
+                # Find the cell that is NOT the label (not containing "in words")
+                val_cells = [c for c in cells if 'in words' not in c.lower() and 'bằng chữ' not in c.lower()]
+                text_val = val_cells[0] if val_cells else line.split(":", 1)[-1].strip()
+            else:
+                text_val = line.split(":", 1)[-1].strip()
             # Clean markdown table separators and garbage
             text_val = clean_invoice_total_in_word(text_val)
             if text_val:
@@ -1146,7 +1482,7 @@ def parse_total(block: List[str], invoice: Invoice):
 
         # Thuế suất (VAT Rate)
         # Scan for "Thuế suất", "VAT Rate", "Chịu thuế", "Tiền thuế GTGT" + "%"
-        if (any(k in l for k in ["thuế suất", "vat rate", "chịu thuế", "thuế gtgt"]) and "%" in l):
+        if (any(k in l for k in ["thuế suất", "vat rate", "chịu thuế", "thuế gtgt", "tax rate"])):
              m = re.search(r"(\d+%)", line)
              if m:
                  val = m.group(1)  # e.g. "10%"
@@ -1169,80 +1505,127 @@ def parse_total(block: List[str], invoice: Invoice):
                      invoice.taxPercent = val
                  elif not invoice.taxPercent:
                      invoice.taxPercent = val
+             else:
+                 # Look ahead for taxPercent (e.g. "Tax Rate \n 10%")
+                 current_idx = block.index(line)
+                 for offset in range(1, 10):
+                     if current_idx + offset < len(block):
+                         next_line = block[current_idx + offset]
+                         m_perc = re.search(r"(\d+%)", next_line)
+                         if m_perc:
+                             invoice.taxPercent = m_perc.group(1)
+                             break
         
         # Tiền thuế (VAT amount)
         # STRICT CHECK: Must not contain "tiền hàng" or "pre tax" to avoid matching PreTax line
-        if ("tiền thuế" in l or "vat amount" in l) and "tiền hàng" not in l and "pre tax" not in l:
+        if (any(k in l for k in ["tiền thuế", "vat amount", "sales tax"])) and "tiền hàng" not in l and "pre tax" not in l:
             # Handle "|Tổng tiền thuế: 4.968.262|" format
             val = None
             if ":" in line:
                val_part = line.split(":")[-1].strip().strip("|")
                nums = re.findall(r'[\d\.\,]+', val_part)
                if nums:
-                   from src.parsers.invoice_table_parser import safe_parse_float
                    val = safe_parse_float(nums[0])
             
             # Fallback to finding all numbers in line
             if not val:
                  nums = re.findall(r"[\d\.\,]+", line)
                  if nums:
-                     from src.parsers.invoice_table_parser import safe_parse_float
                      val = safe_parse_float(nums[-1])
 
             if val and val > 100:
                 invoice.taxAmount = val
+            else:
+                # Look ahead logic for "Sales Tax \n \n GBP 2,954"
+                current_idx = block.index(line)
+                # Search next 10 lines for a number
+                for offset in range(1, 10):
+                    if current_idx + offset < len(block):
+                        next_line = block[current_idx + offset]
+                        nums = re.findall(r'[\d\.\,]+', next_line)
+                        if nums:
+                            val = safe_parse_float(nums[0])
+                            if val and val > 0:
+                                invoice.taxAmount = val
+                                break
         
         # Tiền trước thuế (PreTax) - Added specific check for summary table
-        if ("tổng tiền hàng" in l or "thành tiền trước thuế" in l or "cộng tiền hàng" in l) and "thanh toán" not in l and "total amount" not in l:
+        if (any(k in l for k in ["tổng tiền hàng", "thành tiền trước thuế", "cộng tiền hàng", "subtotal"])) and "thanh toán" not in l and "total amount" not in l:
              val = None
              if ":" in line:
                 val_part = line.split(":")[-1].strip().strip("|")
                 nums = re.findall(r'[\d\.\,]+', val_part)
                 if nums:
-                    from src.parsers.invoice_table_parser import safe_parse_float
                     val = safe_parse_float(nums[0])
              
              if not val:
                   nums = re.findall(r"[\d\.\,]+", line)
                   if nums:
-                      from src.parsers.invoice_table_parser import safe_parse_float
                       val = safe_parse_float(nums[-1])
              
              if val and val > 0:
                  invoice.preTaxPrice = val
+             else:
+                 # Look ahead logic
+                 current_idx = block.index(line)
+                 for offset in range(1, 10):
+                     if current_idx + offset < len(block):
+                         next_line = block[current_idx + offset]
+                         nums = re.findall(r'[\d\.\,]+', next_line)
+                         if nums:
+                             val = safe_parse_float(nums[0])
+                             if val and val > 0:
+                                 invoice.preTaxPrice = val
+                                 break
 
     # Default Currency - detect from block context
     if not invoice.currency:
         block_text = '\n'.join(block)
-        # Check if invoice contains EURO indicators
-        if re.search(r'\(EURO\)|EUR|euro', block_text, re.I):
+        # Check if invoice contains currency indicators (symbols + codes)
+        if re.search(r'€|\(EURO\)|EUR|euro', block_text, re.I):
             invoice.currency = "EUR"
-        elif re.search(r'\(USD\)|USD|dollar', block_text, re.I):
+        elif re.search(r'\$|\(USD\)|USD|dollar', block_text, re.I):
             invoice.currency = "USD"
-        else:
-            invoice.currency = "VND"  # Default for Vietnamese invoices
+        elif re.search(r'£|\(GBP\)|GBP', block_text, re.I):
+            invoice.currency = "GBP"
+        elif re.search(r'VND|VNĐ|đồng', block_text, re.I):
+            invoice.currency = "VND"
 
     # FALLBACK: If totalAmount is still missing or suspiciously small,
     # find the largest number in the table block as totalAmount
     # User insight: "The largest number in the table will definitely be totalAmount"
-    from src.parsers.invoice_table_parser import safe_parse_float
     
     all_numbers = []
     for line in block:
+        low = line.lower()
+        # EXCLUDE bank/account lines, phone numbers, postal codes
+        if any(k in low for k in ["beneficiary", "account", "bank", "swift",
+                                   "iban", "sort-code", "routing",
+                                   "tel", "phone", "fax", "postal", "zip"]):
+            continue
         # Extract all number-like strings
         nums = re.findall(r'[\d\.\,]+', line)
         for n in nums:
             parsed = safe_parse_float(n)
-            if parsed and parsed > 0:
+            # Reasonable range: > 0 and < 100 million (exclude phone/account numbers)
+            if parsed and parsed > 0 and parsed < 100_000_000:
                 all_numbers.append(parsed)
     
     if all_numbers:
         max_num = max(all_numbers)
-        # Only use fallback if:
-        # 1. totalAmount is not set, OR
-        # 2. totalAmount is significantly smaller than max (likely a parsing error)
-        if not invoice.totalAmount or (max_num > invoice.totalAmount * 5):
-            invoice.totalAmount = max_num
+        # Only use fallback if totalAmount is not set
+        if not invoice.totalAmount:
+            # Validate against item amounts if available
+            if invoice.itemList:
+                item_sum = sum(it.amount or 0 for it in invoice.itemList)
+                if item_sum > 0 and max_num > item_sum * 2:
+                    # max_num is suspiciously larger than item sum — likely a non-financial number
+                    # Use item sum instead
+                    invoice.totalAmount = item_sum
+                else:
+                    invoice.totalAmount = max_num
+            else:
+                invoice.totalAmount = max_num
 
 
 # GLOBAL FIELDS PARSER - scan toàn bộ raw text để tìm invoiceID, invoiceFormNo
@@ -1301,6 +1684,12 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
         if re.search(r'\(USD\$?\)', text_upper): usd_score += 4
         if re.search(r'U\.S\.?\s*DOLLAR', text_upper): usd_score += 5
         if re.search(r'DOLLAR', text_upper): usd_score += 2
+        # Table header patterns: "USD/MT", "USD/kg", "in USD", "Amount (USD)"
+        if re.search(r'USD\s*/\s*\w+', text_upper): usd_score += 4
+        if re.search(r'\bIN\s+USD\b', text_upper): usd_score += 5
+        if re.search(r'AMOUNT\s*\(?USD', text_upper): usd_score += 5
+        if re.search(r'PRICE\s*\(?USD', text_upper): usd_score += 5
+        if re.search(r'TOTAL\s*\(?USD', text_upper): usd_score += 5
         if usd_score > 0:
             scores['USD'] = usd_score
 
@@ -1310,6 +1699,10 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
         if re.search(r'\bEUR\b', text_upper): eur_score += 5
         if re.search(r'\(EURO\)', text_upper): eur_score += 4
         if re.search(r'\bEURO\b', text_upper): eur_score += 3
+        # Table header: "in EUR", "Value in EUR", "Amount (EUR)"
+        if re.search(r'\bIN\s+EUR\b', text_upper): eur_score += 5
+        if re.search(r'AMOUNT\s*\(?EUR', text_upper): eur_score += 5
+        if re.search(r'VALUE\s*\(?.*?EUR', text_upper): eur_score += 5
         if eur_score > 0:
             scores['EUR'] = eur_score
 
@@ -1396,11 +1789,18 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
                      if m:
                          invoice.invoiceID = m.group(1).lstrip('0') or m.group(1)
     
-        # Pattern 6: Number: IVN2025121 (English format)
+        # Pattern 6: Number: IVN2025121 or Invoice Number: 12345 (English format)
+        # Exclude: Importer Number, Order Number, Account Number, etc.
         if not invoice.invoiceID:
-            m = re.search(r'Number[:\s]+([A-Z]{2,5}\d+|\d+)', raw_text, re.I)
+            m = re.search(r'\bNumber\s*[:\s]+([A-Z]{2,5}\d+|\d{2,})', raw_text, re.I)
             if m:
-                invoice.invoiceID = m.group(1)
+                # Check context: exclude Importer Number, Order Number, Account Number, etc.
+                before = raw_text[max(0, m.start()-20):m.start()].lower()
+                _excluded_prefixes = ['importer', 'order', 'account', 'phone', 'contact',
+                                      'sales order', 'waybill', 'tracking', 'package',
+                                      'export']
+                if not any(before.rstrip().endswith(ep) for ep in _excluded_prefixes):
+                    invoice.invoiceID = m.group(1)
         
         # Pattern 7: Invoice #: 67928 or Invoice#: 67928
         if not invoice.invoiceID:
@@ -1528,8 +1928,9 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
                     pass
         
         # Pattern 10: Total Value(总申报价值): $2,614 or "Total Value: 2614"
+        #   Also handles pipe-table: "Total Value (总申报价值): | $2,614 |"
         if not invoice.totalAmount:
-            m = re.search(r'Total\s+Value[^:)]*(?:\([^)]*\))?\s*[:\s]*\$?([\d\.\,]+)', raw_text, re.I)
+            m = re.search(r'Total\s+Value[^:\n]*(?:\([^)]*\))?\s*:\s*\|?\s*\$?([\d\.\,]+)', raw_text, re.I)
             if m:
                 num = m.group(1).replace(',', '')
                 try:
@@ -1557,6 +1958,35 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
                         invoice.totalAmount = val
                 except:
                     pass
+        
+        # Pattern 13: "Total This Page | ... | 25475.00 |" or "Consignment Total | ... | 25475.00 |"
+        if not invoice.totalAmount:
+            m = re.search(r'(?:Total\s+This\s+Page|Consignment\s+Total|Invoice\s+Total)[^|]*\|[^|]*\|\s*\$?([\d\,\.]+)', raw_text, re.I)
+            if m:
+                val = safe_parse_float(m.group(1))
+                if val and val > 0:
+                    invoice.totalAmount = val
+        
+        # Pattern 14: "| Invoice Total ... | ... | USD | $25475.00 |" (4+ column pipe table)
+        if not invoice.totalAmount:
+            m = re.search(r'Invoice\s+Total[^|]*(?:\|[^|]*){2,}\|\s*\$?([\d\,\.]+)', raw_text, re.I)
+            if m:
+                val = safe_parse_float(m.group(1))
+                if val and val > 0:
+                    invoice.totalAmount = val
+    
+        
+        # Pattern 16: Last/largest $USD value in text as fallback
+        if not invoice.totalAmount:
+            usd_vals = re.findall(r'\$\s*(?:USD\s*)?([\d\,\.]+)', raw_text, re.I)
+            if usd_vals:
+                max_val = 0
+                for v in usd_vals:
+                    parsed = safe_parse_float(v)
+                    if parsed and parsed > max_val:
+                        max_val = parsed
+                if max_val > 0:
+                    invoice.totalAmount = max_val
     
     # ===== CURRENCY DETECTION (Auto-detect from raw text) =====
     if not invoice.currency or invoice.currency == "VND":
@@ -1589,6 +2019,14 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
         m = re.search(r"BENEFICIARY'?S?\s*BANK[:\s]*(.+?)(?:\n|$)", raw_text, re.I)
         if m:
             invoice.sellerBank = m.group(1).strip()
+    
+    # ===== SELLER PHONE (fallback) =====
+    if not invoice.sellerPhoneNumber:
+        m = re.search(r'TEL[:\s]+(\+?[\d\s\-\(\)\.]{7,})', raw_text, re.I)
+        if m:
+            phone = re.sub(r'[\s\-\(\)]', '', m.group(1)).strip()
+            if len(phone) >= 7:
+                invoice.sellerPhoneNumber = m.group(1).strip()
     
     # ===== INVOICE NAME (fallback) =====
     if not invoice.invoiceName:
@@ -1735,7 +2173,7 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
             m = re.search(r'[Cc]ustomer[:\s]*([^\n]+)', raw_text)
             if m:
                 val = m.group(1).strip().strip('*')
-                if val and len(val) > 3 and 'address' not in val.lower():
+                if val and len(val) > 3 and 'address' not in val.lower() and '|' not in val:
                     invoice.buyerName = val
         
         # Pattern 6: CONSIGNEE/COMPANY NAME公司名称: → next line is buyer name
@@ -1776,9 +2214,9 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
         for pattern in patterns:
             m = re.search(pattern, raw_text)
             if m:
-                num = m.group(1).replace('.', '').replace(',', '')
-                if num.isdigit() and int(num) > 100:
-                    invoice.preTaxPrice = float(num)
+                val = safe_parse_float(m.group(1))
+                if val and val > 0:
+                    invoice.preTaxPrice = val
                     break
     
     # ===== TAX AMOUNT (fallback) =====
@@ -1787,7 +2225,8 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
         patterns = [
             r'[Tt]huế\s*(?:GTGT|giá\s*trị\s*gia\s*tăng)[^:]*:\s*([\d\.\,]+)',
             r'[Tt]iền\s*thuế[^:]*:\s*([\d\.\,]+)',
-            r'VAT[^:]*:\s*([\d\.\,]+)',
+            # VAT: only when followed by a number, NOT 'VAT Excluded', 'VAT on', 'VAT free'
+            r'VAT\s*(?!\s*(?:excluded|on\s|free|rate|amount)[\s|])[^:\n]*:\s*([\d\.\,]+)',
             r'[Ss]ales\s*[Tt]ax[^:]*:\s*(?:[A-Z]{3}\s*)?([\d\.\,]+)',  # Sales Tax: GBP 2,954
         ]
         for pattern in patterns:
@@ -1815,18 +2254,21 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
     
     # ===== DISCOUNT TOTAL (NEW!) =====
     if not invoice.discountTotal:
-        # Pattern: "Chiết khấu:", "Giảm giá:", "Discount:"
+        # Pattern: "Chiết khấu:", "Giảm giá:", "Discount:" — must be on SAME LINE (no newline crossing)
         patterns = [
-            r'[Cc]hiết\s*khấu[^:]*:\s*([\d\.\,]+)',
-            r'[Gg]iảm\s*giá[^:]*:\s*([\d\.\,]+)',
-            r'[Dd]iscount[^:]*:\s*([\d\.\,]+)',
+            r'[Cc]hiết\s*khấu[^:\n]*:\s*([\d\.\,]+)',
+            r'[Gg]iảm\s*giá[^:\n]*:\s*([\d\.\,]+)',
+            # Match Discount: with colon — not "Discounts" column header
+            r'[Dd]iscount\s*:[\s]*([\d\.\,]+)',
+            # Bold label format: "**Discount** -$8.75" or "Discount $8.75"
+            r'\b[Dd]iscount\b[*]*\s*[-]?\s*\$?\s*([\d,\.]+)',
         ]
         for pattern in patterns:
             m = re.search(pattern, raw_text)
             if m:
-                num = m.group(1).replace('.', '').replace(',', '')
-                if num.isdigit() and int(num) > 0:
-                    invoice.discountTotal = float(num)
+                val = safe_parse_float(m.group(1))
+                if val and val > 0:
+                    invoice.discountTotal = val
                     break
     
     # ===== PAYMENT METHOD (fallback) =====
@@ -1834,10 +2276,13 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
         # Pattern: "Hình thức thanh toán:", "Payment method:", "Payment:"
         patterns = [
             r'[Hh]ình\s*thức\s*thanh\s*toán[^:\n]*[:\s]+([^\n|]+)',  # Relaxed [^:\n]* to match line till colon
-            r'[Pp]ayment\s*(?:method)?[^:\n]*[:\s]+([^\n|]+)',
+            r'[Pp]ayment\s+(?:method|by|terms?)\s*[:\s]+([^\n|]+)',
+            r'[Tt]erms?\s+of\s+(?:payment|sale)\s*[:\n]\s*([^\n|]+)',
+            r'[Pp]ayment\s*:\s*([^\n|]+)',
         ]
+        _pm_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', raw_text)
         for pattern in patterns:
-            m = re.search(pattern, raw_text)
+            m = re.search(pattern, _pm_text, re.I)
             if m:
                 val = m.group(1).strip().strip('*|')
                 # Clean up trailing keywords that might leak into the value
@@ -1853,6 +2298,10 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
             r'[Bb]ằng\s*chữ[^:]*:\s*([^\n]+)',
             r'[Ss]ố\s*tiền\s*(?:viết\s*)?bằng\s*chữ[^:]*:\s*([^\n]+)',
             r'[Ii]n\s*words?[^:]*:\s*([^\n]+)',
+            # EN: "SAY USD TWO THOUSAND SIX HUNDRED FOURTEEN ONLY" or "SAY: US DOLLARS..."
+            r'\bSAY[:\s*]+\s*((?:USD?|EUR|GBP|CNY)?\s*[A-Z][A-Z\s]+(?:ONLY|DOLLARS?|EUROS?|POUNDS?))',
+            # EN: "Total in Words: One Hundred..."
+            r'[Tt]otal\s+[Ii]n\s+[Ww]ords?\s*[:\|]\s*([^\n]+)',
         ]
         for pattern in patterns:
             m = re.search(pattern, raw_text)
@@ -1863,9 +2312,723 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
                     break
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# EN COMMERCIAL INVOICE PRE-PARSER
+# Runs BEFORE detect_blocks() to extract fields from EN invoice patterns.
+# Only activates when VN markers are absent. Does NOT modify VN logic.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _is_en_invoice(raw_text: str) -> bool:
+    """Check if this is an EN commercial invoice (not VN tax invoice)."""
+    low = raw_text.lower()
+    # VN markers — if ANY present, skip EN pre-parser
+    vn_markers = ["hóa đơn giá trị gia tăng", "đơn vị bán hàng", "mã số thuế",
+                  "phiếu xuất kho", "phiếu nhập kho", "biên bản hủy",
+                  "người mua hàng", "tiền thuế gtgt", "cộng tiền hàng"]
+    if any(m in low for m in vn_markers):
+        return False
+    # EN markers — need at least one
+    en_markers = ["commercial invoice", "proforma invoice", "invoice",
+                  "bill to", "consignee", "shipper", "exporter",
+                  "the seller:", "the buyer:", "ship to", "ship from"]
+    return any(m in low for m in en_markers)
+
+
+def _extract_after_label(text: str, label_pattern: str, max_lines: int = 3) -> tuple:
+    """Extract name + address lines after a label pattern.
+    Returns (name, address) or (None, None).
+    """
+    m = re.search(label_pattern, text, re.I | re.MULTILINE)
+    if not m:
+        return None, None
+    
+    # Check if value is on the same line after ":"
+    rest_of_line = text[m.end():].split('\n')[0].strip().strip(':').strip()
+    
+    # Collect following lines
+    after = text[m.end():]
+    lines = []
+    for line in after.split('\n'):
+        line = line.strip().strip('*').strip('#').strip()
+        # Remove markdown bold
+        line = re.sub(r'\*\*([^*]+)\*\*', r'\1', line)
+        if not line or line == '---':
+            if lines:
+                break
+            continue
+        # Stop at next section label or table line
+        low = line.lower()
+        # Check for exact standalone labels (no colon) like "Address", "Phone", "Email"
+        _exact_labels = {'address', 'phone', 'email', 'tel', 'fax', 'mobile', 'contact person',
+                         'company name', 'full name', 'zip code', 'city', 'country'}
+        if low.strip('- ') in _exact_labels and lines:
+            break  # Stop if we already have some data and hit a new label
+        if any(k in low for k in ['address:', 'phone:', 'tel:', 'fax:', 'email:',
+                                    'mobile:', 'contact:', 'website:',
+                                    'invoice no', 'inv. no', 'invoice date',
+                                    'inv. date', 'date:', 'awb', 'b/l',
+                                    'transportation', 'payment', 'terms',
+                                    'description', 'the buyer:', 'the seller:',
+                                    'consignee', 'shipper', 'importer',
+                                    'exporter details', 'importer details',
+                                    'bill to', 'ship to', 'ship from',
+                                    'sold to', 'bank', 'signature',
+                                    'i declare', 'i certify', 'total',
+                                    'reason for', 'contents type']):
+            # Phone/mobile/tel: skip line but continue (don't break)
+            if any(k in low for k in ['phone:', 'mobile:', 'tel:', 'fax:']):
+                continue
+            # If it's "Address:" extract its value
+            if ('address:' in low or 'address :' in low) and ':' in line:
+                addr_val = line.split(':', 1)[-1].strip()
+                if addr_val and len(addr_val) > 3:
+                    if len(lines) == 0 and rest_of_line:
+                        lines.append(rest_of_line)
+                    lines.append(addr_val)
+            break
+        # Handle table lines: extract first non-empty cell
+        if line.startswith('|'):
+            cells = [c.strip() for c in line.split('|') if c.strip()]
+            if cells and len(cells[0]) > 2:
+                lines.append(cells[0])
+            continue
+        if re.fullmatch(r'[-|:\s]+', line):
+            continue
+        lines.append(line)
+    
+    
+    # Sub-labels that should be skipped when they appear as the "name"
+    _sub_labels = {'company name', 'full name', 'contact person', 'name', 'company'}
+    
+    if rest_of_line and len(rest_of_line) > 2:
+        # If rest_of_line is a known sub-label, clear it to fall through to lines processing
+        if rest_of_line.lower().strip('- ') in _sub_labels:
+            rest_of_line = ''  # Clear so elif lines: is taken
+    
+    if rest_of_line and len(rest_of_line) > 2:
+        # If rest_of_line contains metadata like "INV. NO", ignore it as the name
+        if any(k in rest_of_line.upper() for k in ['INV. NO', 'DATE:', 'PAGE:']):
+            name = lines[0] if lines else None
+            address = ', '.join(lines[1:6]).strip() if len(lines) > 1 else None
+        else:
+            name = rest_of_line
+            # rest_of_line and lines[0] come from the same first line in 'after',
+            # so skip lines[0] (the name) to avoid duplicating name in address
+            addr_lines = lines[1:] if lines and lines[0].strip() == rest_of_line.strip() else lines
+            address = ', '.join(addr_lines[:5]).strip() if addr_lines else None
+    elif lines:
+        # Skip sub-labels at the start of lines (e.g. "Company Name" is a label, next line is the value)
+        _sub_labels = {'company name', 'full name', 'contact person', 'name', 'company'}
+        start_idx = 0
+        while start_idx < len(lines) and lines[start_idx].lower().strip('- ') in _sub_labels:
+            start_idx += 1
+        if start_idx < len(lines):
+            name = lines[start_idx]
+            address = ', '.join(lines[start_idx+1:start_idx+6]).strip() if len(lines) > start_idx + 1 else None
+        else:
+            name = lines[0]
+            address = ', '.join(lines[1:6]).strip() if len(lines) > 1 else None
+    else:
+        return None, None
+    
+    # Clean name: remove markdown, limit length, handle pipe content
+    if name:
+        name = re.sub(r'^[#\s|]+', '', name).strip()
+        if '|' in name:
+            cells = [c.strip() for c in name.split('|') if c.strip()]
+            if cells:
+                name = cells[0]
+        if len(name) > 100:
+            name = name[:100]
+            
+    if address:
+        if address.startswith('|'):
+             cells = [c.strip() for c in address.split('|') if c.strip()]
+             address = ', '.join(cells)
+        if len(address) > 150:
+            address = address[:150]
+    
+    return (name if name and len(name) > 2 else None), (address if address and len(address) > 2 else None)
+
+
+def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
+    """Pre-parse EN commercial invoice patterns before block detection."""
+    if not _is_en_invoice(raw_text):
+        return
+    
+    text = raw_text
+    # Strip markdown bold for easier parsing
+    clean_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+    low = clean_text.lower()
+    
+    # ===== INVOICE NAME =====
+    if not invoice.invoiceName:
+        for pat in [r'(?:^|\n)\s*#*\s*(COMMERCIAL\s+INVOICE(?:[ \t]+\w+)*)',
+                    r'(?:^|\n)\s*#*\s*(PROFORMA\s+INVOICE)',
+                    r'(?:^|\n)\s*#*\s*(PRO\s+FORMA\s+INVOICE)',
+                    r'(?:^|\n)\s*#*\s*(TAX\s+INVOICE)',
+                    r'(?:^|\n)\s*#*\s*(INVOICE)']:
+            m = re.search(pat, clean_text, re.I)
+            if m:
+                invoice.invoiceName = m.group(1).strip()
+                break
+    
+    # ===== SELLER =====
+    # Generic skip words for extracted names
+    _skip_names = {'name', 'address', 'phone', 'email', 'from', 'to', 'date',
+                   'invoice', 'commercial invoice', 'proforma invoice',
+                   'exporter', 'shipper', 'consignee', 'importer',
+                   'ship to', 'ship from', 'bill to', 'bill from',
+                   'sold to', 'delivery details', 'customer\'s details'}
+    
+    # ===== SELLER =====
+    seller_patterns = [
+        # Case 4 style: regex must skip the | COMMERCIAL INVOICE | part
+        r'THE SELLER\s*:\s*\|\s*([^|\n]+)',
+        r'(?:THE\s+SELLER|SHIP\s+FROM|BILL\s+FROM|EXPORTER)\s*[:\n]',
+        r'(?:^|\n)\s*(?:Seller|Exporter\s+Details|Exporter\s+Name|Sender/Exporter|Sender\s+Name|Shipper/Exporter|Vendor/Exporter)\s*[:\n]',
+        r'Shipper\s*[:\n]',
+    ]
+    for pat in seller_patterns:
+        if not invoice.sellerName:
+            m = re.search(pat, clean_text, re.I)
+            if m:
+                if m.groups():
+                    val = m.group(1).strip()
+                    if val and val.lower().strip() not in _skip_names:
+                        invoice.sellerName = val
+                else:
+                    name, addr = _extract_after_label(clean_text, pat)
+                    if name and len(name) > 2:
+                        if name.lower().strip() not in _skip_names and not name.startswith('|'):
+                            invoice.sellerName = name
+                            if addr and not invoice.sellerAddress:
+                                invoice.sellerAddress = addr
+    
+    # Fallback: company name before INVOICE header (e.g., "MICRODYN-NADIR..." then "INVOICE")
+    if not invoice.sellerName:
+        m = re.search(r'^([A-Z][A-Za-z \t&.,\'-]+(?:CO\.?,?[ \t]*LTD|INC|CORP|PTE[ \t]+LTD|LLC|COMPANY|GMBH|SAS|S\.A\.?)[. \t]*)', clean_text, re.M)
+        if m:
+            val = m.group(1).strip().rstrip('.')
+            if len(val) > 3 and 'invoice' not in val.lower():
+                invoice.sellerName = val
+    
+    # Fallback 2: "Full Name:\n  Xxx" or "Company Name:\n  Xxx" pattern
+    if not invoice.sellerName:
+        # Try Full Name first (prioritize person name over company)
+        m = re.search(r'Full\s+Name\s*[:\n]\s*(.+)', clean_text, re.I)
+        if m:
+            val = m.group(1).strip().strip('*')
+            if val and len(val) > 2 and val.lower().strip() not in _skip_names:
+                invoice.sellerName = val
+    if not invoice.sellerName:
+        m = re.search(r'(?:^|\n)\s*Company\s+Name\s*[:\n]\s*(.+)', clean_text, re.I)
+        if m:
+            val = m.group(1).strip().strip('*')
+            # Skip if value looks like an address (has house numbers + street words)
+            _looks_like_address = bool(re.search(r'\d+\s+\w+\s+(?:St|Street|Rd|Road|Ave|Lane|Blvd|Dr|Drive)', val, re.I))
+            if (val and len(val) > 2
+                    and val.lower().strip() not in _skip_names
+                    and not _looks_like_address):
+                invoice.sellerName = val
+    
+    # Fallback 3: "FROM :\n Full Name : Xxx" pattern
+    if not invoice.sellerName:
+        m = re.search(r'\bFROM\s*:\s*\n(?:.*?Full\s+Name\s*:\s*)?(.+)', clean_text, re.I)
+        if m:
+            val = m.group(1).strip().strip('*')
+            if val and len(val) > 2 and val.lower().strip() not in _skip_names:
+                invoice.sellerName = val
+    
+    # Fallback 4: "Ship-from address:\nCompany Name" pattern
+    if not invoice.sellerName:
+        m = re.search(r'Ship[\-\s]+from\s+address\s*:\s*\n\s*(.+)', clean_text, re.I)
+        if m:
+            val = m.group(1).strip().strip('*')
+            if val and len(val) > 3 and val.lower().strip() not in _skip_names:
+                invoice.sellerName = val
+                # Try to get address from following lines (skip blank lines)
+                rest = clean_text[m.end():]
+                addr_lines = []
+                for line in rest.split('\n')[:6]:
+                    line = line.strip()
+                    if not line:
+                        continue  # skip blank lines
+                    if line.startswith('**') or any(k in line.lower() for k in ['terms of', 'delivery', 'shipping', 'payment', 'condition']):
+                        break
+                    addr_lines.append(line)
+                if addr_lines and not invoice.sellerAddress:
+                    invoice.sellerAddress = ', '.join(addr_lines)
+    
+    # Fallback 5: Markdown heading (## CompanyName) after invoice title — but only if separated by blank line
+    # and the heading looks like a company name (not a single word like software name)
+    if not invoice.sellerName:
+        m = re.search(r'(?:COMMERCIAL\s+INVOICE|PROFORMA\s+INVOICE|TAX\s+INVOICE|INVOICE)[^\n]*\s*\n\s*\n\s*#+\s*(.+)', clean_text, re.I)
+        if m:
+            val = m.group(1).strip().strip('*')
+            if val and len(val) > 2 and val.lower().strip() not in _skip_names and ' ' in val:
+                # Exclude document subtitles like "Sample Commercial Invoice"
+                _title_words = {'invoice', 'sample', 'instructions', 'template', 'example', 'proforma'}
+                if not any(tw in val.lower() for tw in _title_words):
+                    invoice.sellerName = val
+    
+    # Seller address fix: extract from ADDRESS label after SHIPPER/SELLER section
+    if not invoice.sellerAddress or invoice.sellerAddress.startswith('#') or invoice.sellerAddress.startswith('|'):
+        # Try finding address lines after SELLER/SHIPPER keywords
+        m = re.search(r'(?:SELLER|SHIPPER).*?ADDRESS\s*:.*?\n\|\s*([^|]+)', clean_text, re.I | re.S)
+        if not m:
+             # Case 4 specific: table format with rows:
+             # | THE SELLER: | COMMERCIAL INVOICE |
+             # |------------|---------------------|
+             # | COMPANY NAME | |
+             # | ADDRESS ROW | |
+             # Capture group 1 = company name row, group 2 = address row after separator
+             m = re.search(
+                 r'THE SELLER.*?\n\|[-\s|]+\|\s*\n'   # skip separator row
+                 r'\|\s*([^|\n]+?)\s*\|[^\n]*\n'       # group 1 = company name row
+                 r'\|\s*([^|\n]+)',                     # group 2 = address row
+                 clean_text, re.I | re.S
+             )
+        if m:
+            # group(1) is company name, group(2) is address
+            # Only use group(2) (address row) to avoid overwriting with company name
+            addr_val = m.group(2).strip() if m.lastindex >= 2 else m.group(m.lastindex).strip()
+            # Reject separator-looking values (all dashes)
+            if addr_val and len(addr_val) > 5 and not re.fullmatch(r'[-\s|]+', addr_val):
+                # Also update sellerName if not set yet and group 1 has a plausible company name
+                if m.lastindex >= 2:
+                    name_cand = m.group(1).strip()
+                    if name_cand and len(name_cand) > 3 and not invoice.sellerName:
+                        invoice.sellerName = name_cand
+                invoice.sellerAddress = addr_val
+    
+    # ===== BUYER =====
+    buyer_patterns = [
+        # Case 4 style: THE BUYER: | INV. NO.: |
+        r'THE BUYER\s*:\s*\|\s*([^|\n]+)',
+        r'(?:THE\s+BUYER|CONSIGNED\s+TO|SOLD\s+TO|BILL\s+TO)\s*[:\n]',
+        # Invoice To has buyer name — check BEFORE Ship To (which often has address only)
+        r'(?:Invoice\s+To|Importer\s+Details|Importer\s+Name|Consignee\s+Name)\s*[:\n]',
+        # NOTIFY PARTY is the actual buyer when CONSIGNEE is a bank order
+        r'(?:NOTIFY\s+PARTY)\s*[:\n]',
+        r'(?:CONSIGNEE|SHIP\s+TO|IMPORTER)\s*[:\n]',
+        r'(?:Recipient/Ship\s+To)\s*[:\n]',
+        r"CONSIGNEE'S\s+(?:MEMBER|COMPANY)\s*[:\n]",
+    ]
+    _buyer_skip = _skip_names | {'same as consignee', '(if other than recipient)',
+                                 'customer po no.', 'customer po no', 'reference no.',
+                                 'permanent', 'account number', 'account payable',
+                                 'the order of'}
+    # Regex to detect invoice header labels that should NOT be stored as buyerName
+    _invoice_label_re = re.compile(
+        r'(?:inv\.?\s*no|inv\.?\s*date|invoice\s*no|invoice\s*date|payment\s*term|s/c\s*no|transportation)',
+        re.I
+    )
+    for pat in buyer_patterns:
+        if not invoice.buyerName:
+            m = re.search(pat, clean_text, re.I)
+            if m:
+                if m.groups():
+                    val = m.group(1).strip()
+                    # Reject if value looks like an invoice header label (e.g. "INV. NO.:"), not a buyer name
+                    if val and val.lower().strip() not in _buyer_skip and not _invoice_label_re.search(val):
+                        invoice.buyerName = val
+                else:
+                    name, addr = _extract_after_label(clean_text, pat)
+                    if name and len(name) > 2:
+                        if (name.lower().strip() not in _buyer_skip
+                                and not name.startswith('|')
+                                and not name.startswith('PO No')
+                                and 'to the order of' not in name.lower()):
+                            invoice.buyerName = name
+                            # Strip label prefixes like "Customer : " from buyer name
+                            _name_labels = re.match(r'^(?:Customer|Company|Name|Client)\s*:\s*', invoice.buyerName, re.I)
+                            if _name_labels:
+                                invoice.buyerName = invoice.buyerName[_name_labels.end():].strip()
+                            if addr and not invoice.buyerAddress:
+                                # Strip "Address :" prefix and stop at Phone/Email
+                                addr_clean = re.sub(r'^(?:Address|Addr\.?)\s*:\s*', '', addr, flags=re.I)
+                                # Remove Phone/Email parts from address
+                                addr_clean = re.split(r',\s*(?:Phone|Tel|Email|Mobile)\s*:', addr_clean, flags=re.I)[0].strip().rstrip(',')
+                                if addr_clean:
+                                    invoice.buyerAddress = addr_clean
+                            # Extract buyer phone from nearby Mobile:/Phone:/Tel: lines
+                            if not invoice.buyerPhoneNumber:
+                                after_label = clean_text[m.end():m.end()+300]
+                                phone_m = re.search(r'(?:Mobile|Phone|Tel)\s*:\s*([\+\d][\d \-\(\)\.]{6,})', after_label, re.I)
+                                if phone_m:
+                                    invoice.buyerPhoneNumber = phone_m.group(1).strip()
+    
+    # Buyer fallback: "To:\nCOMPANY NAME" (only if name looks like company)
+    if not invoice.buyerName:
+        m = re.search(r'\bTo\s*:\s*\n\s*(.+)', clean_text)
+        if m:
+            val = m.group(1).strip().strip('*')
+            # Only accept if it looks like a company name (uppercase or has CO./LTD)
+            if val and len(val) > 3 and (val[0].isupper() or 'co.' in val.lower()):
+                if val.lower().strip() not in _buyer_skip:
+                    invoice.buyerName = val
+    
+    # Buyer fallback: "For Account and Risk of : XXX" or "For Account of: XXX"
+    if not invoice.buyerName:
+        m = re.search(r'For\s+Account\s+(?:and\s+Risk\s+)?of\s*:\s*(.+)', clean_text, re.I)
+        if m:
+            val = m.group(1).strip().strip('*')
+            if val and len(val) > 2:
+                invoice.buyerName = val
+    
+    # Buyer fallback: "Billed to\nXxx" or "Bill-to address:\nXxx"
+    if not invoice.buyerName:
+        m = re.search(r'Bill(?:ed)?[\s-]+to(?:\s+address)?\s*[:\n]\s*(.+)', clean_text, re.I)
+        if m:
+            val = m.group(1).strip().strip('*')
+            if val and len(val) > 2 and val.lower().strip() not in _buyer_skip:
+                invoice.buyerName = val
+                # Also extract buyerAddress from following lines
+                if not invoice.buyerAddress:
+                    rest = clean_text[m.end():]
+                    addr_lines = []
+                    for line in rest.split('\n')[:6]:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        if line.startswith('**') or line.startswith('|') or any(k in line.lower() for k in ['parcel', 'fedex', 'tracking', 'item', 'material']):
+                            break
+                        addr_lines.append(line)
+                    if addr_lines:
+                        invoice.buyerAddress = ', '.join(addr_lines)
+    
+    # Buyer fallback: CONSIGNEE'S MEMBER/COMPANY in pipe-table format
+    # "| CONSIGNEE'S MEMBER: |...|...| \n| COMPANY NAME |...|...|"
+    if not invoice.buyerName:
+        m = re.search(r"CONSIGNEE.S\s+(?:MEMBER|COMPANY)\s*:.*?\n\|\s*([^|]+)", clean_text, re.I)
+        if m:
+            val = m.group(1).strip()
+            if val and len(val) > 3 and val.lower().strip() not in _buyer_skip:
+                invoice.buyerName = val
+    
+    # Buyer fallback: Ultimate Consignee in pipe-table format
+    # "| **Ultimate Consignee** | | |\n| Abc Company | ... | ... |"
+    if not invoice.buyerName:
+        m = re.search(r'Ultimate\s+Consignee[^|]*\|[^|]*\|[^\n]*\n\|\s*([^|]+)', clean_text, re.I)
+        if m:
+            val = m.group(1).strip()
+            if val and len(val) > 2 and val.lower().strip() not in _buyer_skip:
+                invoice.buyerName = val
+                # Try to extract address from subsequent pipe-table rows
+                if not invoice.buyerAddress:
+                    rest = clean_text[m.end():]
+                    _skip_addr = {'consignee', 'phone', 'carrier', 'terminal',
+                                  'pier', 'contact', 'origination', 'destination',
+                                  'exporter', 'account', 'customer'}
+                    for row_m in re.finditer(r'\n\|\s*([^|]+?)\s*\|', rest):
+                        addr_val = row_m.group(1).strip()
+                        if (addr_val and len(addr_val) > 3
+                                and not addr_val.startswith('---')
+                                and not any(k in addr_val.lower() for k in _skip_addr)):
+                            invoice.buyerAddress = addr_val
+                            break
+    
+    # Buyer address fix: extract from ADDRESS label after BUYER section
+    if not invoice.buyerAddress or invoice.buyerAddress.startswith('|'):
+        m = re.search(r'ADDRESS\s*[:\s]*\|\s*([^|]+)', clean_text, re.I)
+        if m:
+            addr_val = m.group(1).strip()
+            # Reject values that look like invoice labels (side-by-side table layout)
+            _reject_labels = ['invoice', 'number', 'date', 'terms', 'order', 'payment']
+            if not any(rl in addr_val.lower() for rl in _reject_labels):
+                invoice.buyerAddress = addr_val
+    
+    # Buyer fallback: second **BoldName** block after seller
+    # Pattern: **SellerName**\nAddress\nPhone\n\n**BuyerName**\nAddress\nPhone
+    if not invoice.buyerName and invoice.sellerName:
+        bold_blocks = list(re.finditer(r'\*\*([^*]+)\*\*', text))
+        _skip_labels = {'terms of sale', 'terms of payment', 'terms', 'notes',
+                        'invoice number', 'date', 'due', 'description',
+                        'subtotal', 'amount due', 'bank', 'payment'}
+        seller_found = False
+        for bm in bold_blocks:
+            val = bm.group(1).strip()
+            low_val = val.lower()
+            if low_val in _skip_labels or any(k in low_val for k in _skip_labels):
+                continue
+            if not seller_found:
+                # Check if this is the seller block
+                if (val.lower().rstrip('.') == invoice.sellerName.lower().rstrip('.')
+                        or invoice.sellerName.lower() in val.lower()):
+                    seller_found = True
+                continue
+            # This is the first bold name after seller → buyer
+            if len(val) > 2 and val.lower().strip() not in _buyer_skip:
+                invoice.buyerName = val
+                # Get address from next line
+                rest = clean_text[bm.end():]
+                lines_after = rest.strip().split('\n')
+                if lines_after and not invoice.buyerAddress:
+                    addr_line = lines_after[0].strip()
+                    if (addr_line and len(addr_line) > 5
+                            and not addr_line.startswith('**')
+                            and not addr_line.startswith('|')
+                            and 'phone' not in addr_line.lower()[:6]):
+                        invoice.buyerAddress = addr_line
+                break
+    
+    # ===== INVOICE ID & DATE =====
+    if not invoice.invoiceID or not invoice.invoiceDate:
+         # Generic pipe-table header extraction
+         # | INV. NO.: | INV250405 |
+         m_id = re.search(r'INV\.\s*NO\..*?\|\s*([^|]+)', clean_text, re.I)
+         if m_id and not invoice.invoiceID:
+             invoice.invoiceID = m_id.group(1).strip()
+             
+         m_date = re.search(r'INV\.\s*DATE.*?\|\s*([^|]+)', clean_text, re.I)
+         if m_date and not invoice.invoiceDate:
+             raw_date = m_date.group(1).strip()
+             # Use date parser logic...
+             invoice.invoiceDate = raw_date # Simplified for now, pre_parse_en_commercial will re-parse later
+         
+         # Pipe-table: "| Date | 2 Sep 2025 |" (exclude "Due Date", "Shipment Date", etc.)
+         if not invoice.invoiceDate:
+             m_pipe_date = re.search(r'\|\s*(?:Invoice\s+)?Date\s*\|\s*([^|]+)\|', clean_text, re.I)
+             if m_pipe_date:
+                 raw_d = m_pipe_date.group(1).strip()
+                 if raw_d and len(raw_d) >= 6:
+                     # Parse "2 Sep 2025" or "09/02/2025" etc.
+                     months = {'jan':'01','feb':'02','mar':'03','apr':'04','may':'05','jun':'06',
+                               'jul':'07','aug':'08','sep':'09','oct':'10','nov':'11','dec':'12'}
+                     m_dmy = re.match(r'(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})', raw_d)
+                     m_mdy = re.match(r'([A-Za-z]{3,})\s+(\d{1,2}),?\s+(\d{4})', raw_d)
+                     if m_dmy:
+                         dd, mon, yyyy = m_dmy.group(1), m_dmy.group(2)[:3].lower(), m_dmy.group(3)
+                         if mon in months:
+                             invoice.invoiceDate = f"{dd.zfill(2)}/{months[mon]}/{yyyy}"
+                     elif m_mdy:
+                         mon, dd, yyyy = m_mdy.group(1)[:3].lower(), m_mdy.group(2), m_mdy.group(3)
+                         if mon in months:
+                             invoice.invoiceDate = f"{dd.zfill(2)}/{months[mon]}/{yyyy}"
+                     elif re.match(r'\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{4}', raw_d):
+                         invoice.invoiceDate = raw_d
+    
+    # ===== INVOICE ID =====
+    if not invoice.invoiceID:
+        id_patterns = [
+            r'(?:INV\.?\s*NO\.?|Invoice\s*No\.?|Invoice\s*#|Invoice\s*Number)[:\s]*[#]?\s*([A-Za-z0-9][\w\-/]+)',
+            r'(?:INVOICE\s*#)[:\s]*([\w\-/]+)',
+            r'(?:Export\s+Invoice\s+No)[^|]*?(\d{3,})',
+            r'(?:^|\n)\s*#(\d{4,})\s*(?:\n|$)',  # "#000001" pattern
+            # "Invoice Number:\n\nINV-2024-0892" (bold label, value on next line)
+            r'Invoice\s*Number\s*[:]*\s*\n\s*\n?\s*([A-Za-z0-9][\w\-/]+)',
+            # "EXPORT REFERENCES (i.e., order no., invoice no.)\n2786"
+            r'EXPORT\s+REFERENCES[^\n]*\n\s*([A-Za-z0-9][\w\-/]+)',
+        ]
+        # Also try pipe-table format: "| Invoice Number | ... |\n|---|---|\n| 25003750 | ... |"
+        m_pipe = re.search(r'Invoice\s+Number[^|]*\|.*?\n(?:\|[-\s|]+\n)?\|\s*([\w\-/]+)', clean_text, re.I)
+        if m_pipe:
+            val = m_pipe.group(1).strip()
+            if val and len(val) >= 3 and re.search(r'\d', val):
+                invoice.invoiceID = val
+        # Pipe-table: "| Export Invoice No & Date | ... |\n|---|---|\n| 1892 | 10 Jan 2018 |"
+        if not invoice.invoiceID:
+            m_pipe2 = re.search(r'Export\s+Invoice\s+No[^|]*\|.*?\n(?:\|[-\s|]+\n)?\|\s*(\d{3,})', clean_text, re.I)
+            if m_pipe2:
+                invoice.invoiceID = m_pipe2.group(1).strip()
+        # Pipe-table key-value: "| Invoice # | 82 |" or "| Invoice No | INV-001 |"
+        if not invoice.invoiceID:
+            m_pipe3 = re.search(r'\|\s*(?:Invoice\s*(?:#|No\.?|Number))\s*\|\s*([^|]+)\|', clean_text, re.I)
+            if m_pipe3:
+                val = m_pipe3.group(1).strip()
+                if val and re.search(r'\d', val):
+                    invoice.invoiceID = val
+        # Words that are NOT valid invoice IDs
+        _bad_ids = {'shipper', 'exporter', 'consignee', 'importer', 'invoice',
+                    'commercial', 'proforma', 'number', 'date', 'serial'}
+        for pat in id_patterns:
+            m = re.search(pat, clean_text, re.I)
+            if m:
+                val = m.group(1).strip().strip('*').strip('#')
+                if val and len(val) >= 1 and not re.fullmatch(r'\d{1,2}', val):
+                    # Reject pure words, words with slashes like 'Shipper/Exporter'
+                    clean_val = val.replace('/', '').replace('-', '').replace('.', '')
+                    if (val.lower() not in _bad_ids
+                            and not re.fullmatch(r'[A-Za-z]+', clean_val)
+                            and not re.fullmatch(r'[A-Za-z]+/[A-Za-z]+', val)):
+                        invoice.invoiceID = val
+                        break
+    
+    # ===== INVOICE DATE =====
+    if not invoice.invoiceDate:
+        months = {'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 'may': '05', 'jun': '06',
+                  'jul': '07', 'aug': '08', 'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12',
+                  'january': '01', 'february': '02', 'march': '03', 'april': '04',
+                  'june': '06', 'july': '07', 'august': '08', 'september': '09',
+                  'october': '10', 'november': '11', 'december': '12'}
+        
+        date_patterns = [
+            # "Date: 20-Nov-2017" or "INV. DATE: APR 4TH,2025"
+            (r'(?:INV\.?\s*)?DATE\s*[:\s]+(\d{1,2})[\s\-/](\w{3,9})[\s\-/,]*(\d{2,4})', 'dmy_name'),
+            # "Date: October 26, 2028" or "DEC 14th 2021" or "Date of Shipment:\n04/24/2024"
+            (r'(?:INV\.?\s*)?DATE[^:]*[:\s]+(\w{3,9})\.?\s*(\d{1,2})(?:st|nd|rd|th)?,?\s*(\d{4})', 'mdy_name'),
+            # "DATE OF EXPORTATION\n06/11/2019"
+            (r'DATE\s+OF\s+\w+\s*\n\s*(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})', 'mdy_num'),
+            # Standalone "October 26, 2028" or "March 28, 2024"
+            (r'(\w{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})', 'mdy_name'),
+            # "Date: mm/dd/yyyy" or "Date: dd/mm/yyyy"
+            (r'(?:INV\.?\s*)?DATE\s*[:\s]+(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})', 'mdy_num'),
+            # "Date: 2025-12-01"
+            (r'(?:INV\.?\s*)?DATE\s*[:\s]+(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})', 'ymd'),
+            # DD.MM.YYYY format (European): "24.03.2025" or "12.2.2022"
+            (r'(\d{1,2})\.(\d{1,2})\.(\d{4})', 'dmy_dot'),
+            # "10 Jan 2018" pattern
+            (r'(\d{1,2})\s+(\w{3,9})\s+(\d{4})', 'dmy_name'),
+            # Standalone dd/mm/yyyy without label (less specific, lower priority)
+            (r'(\d{2})[/\-](\d{2})[/\-](\d{4})', 'mdy_num'),
+        ]
+        
+        for pat, fmt in date_patterns:
+            m = re.search(pat, clean_text, re.I)
+            if m:
+                try:
+                    if fmt == 'dmy_name':
+                        day = m.group(1).zfill(2)
+                        month_name = m.group(2).lower().rstrip('.,')
+                        # Strip ordinal suffixes
+                        month_name = re.sub(r'(st|nd|rd|th)$', '', month_name)
+                        year = m.group(3)
+                        if len(year) == 2:
+                            year = '20' + year
+                        mn = months.get(month_name, months.get(month_name[:3]))
+                        if mn:
+                            invoice.invoiceDate = f"{day}/{mn}/{year}"
+                    elif fmt == 'mdy_name':
+                        month_name = m.group(1).lower().rstrip('.,')
+                        mn = months.get(month_name, months.get(month_name[:3]))
+                        day = m.group(2).zfill(2)
+                        year = m.group(3)
+                        if mn:
+                            invoice.invoiceDate = f"{day}/{mn}/{year}"
+                    elif fmt == 'mdy_num':
+                        p1, p2, yyyy = m.group(1), m.group(2), m.group(3)
+                        # If first number > 12, it must be day (not month) → DD/MM/YYYY
+                        if int(p1) > 12:
+                            dd, mm = p1, p2
+                        else:
+                            mm, dd = p1, p2
+                        invoice.invoiceDate = f"{dd.zfill(2)}/{mm.zfill(2)}/{yyyy}"
+                    elif fmt == 'ymd':
+                        yyyy, mm, dd = m.group(1), m.group(2), m.group(3)
+                        invoice.invoiceDate = f"{dd.zfill(2)}/{mm.zfill(2)}/{yyyy}"
+                    elif fmt == 'dmy_dot':
+                        dd, mm, yyyy = m.group(1), m.group(2), m.group(3)
+                        invoice.invoiceDate = f"{dd.zfill(2)}/{mm.zfill(2)}/{yyyy}"
+                except (ValueError, KeyError):
+                    pass
+                if invoice.invoiceDate:
+                    break
+    
+    # ===== CURRENCY =====
+    if not invoice.currency:
+        if 'USD' in clean_text or '$' in clean_text:
+            invoice.currency = 'USD'
+    
+    # ===== TOTAL AMOUNT (EN patterns) =====
+    if not invoice.totalAmount:
+        total_patterns = [
+            r'EXW[:\s].*?([\d,\.]+)\s*$',
+            r'(?:Grand\s+Total|Total\s+Invoice\s*Value|Total\s+Net\s+Value)[:\s]*\$?([\d,\.]+)',
+            # "Amount Due (USD) | $2,280.00" or "Balance Due: $500"
+            r'(?:Amount|Balance)\s+Due[\s|()\w]*[$£€]\s*([\d,\.]+)',
+            # "Total Amount\n$23,275" or "Total Amount: $23,275"
+            r'Total\s+Amount[:\s]*\n\s*[$£€]?\s?([\d,\.]+)',
+            r'Total\s+Amount\s*[:\s]+[$£€]?\s?([\d,\.]+)',
+            r'\bTOTAL[:\s]+[$£€]?\s?([\d,\.]+)',
+            # Pipe-table: first cell is TOTAL — "| TOTAL | GBP 32499 |" (TOTAL as first cell only)
+            r'^\|\s*TOTAL\s*\|\s*[A-Za-z]{0,3}\s?[$£€]?\s?([\d,\.]+)',
+            # Next-row: "| TOTAL |\n---\n| GBP 32499 |"  (TOTAL as first cell only)
+            r'^\|\s*TOTAL\s*\|[^\n]*\n(?:\|[-\s|]+\|\n)?\|\s*[A-Za-z]{0,3}\s?[$£€]?\s?([\d,\.]+)',
+            # Standalone number on its own line near TOTAL section
+            r'\bTOTAL[:\s][^\n]*\n[^\n]*\n\s*([\d,\.]+)',
+        ]
+        for pat in total_patterns:
+            m = re.search(pat, clean_text, re.I | re.M)
+            if m:
+                val = safe_parse_float(m.group(1))
+                if val and val > 10:  # Minimum guard: totalAmount should be > 10
+                    invoice.totalAmount = val
+                    break
+    
+    # ===== TAX/SUBTOTAL (EN patterns) =====
+    # SPECIAL: Stacked labels pattern — labels on separate lines, values on separate lines
+    # e.g. "Invoice Subtotal\nTax Rate\nSales Tax\n\nGBP 29,545\n10%\nGBP 2,954"
+    if not invoice.preTaxPrice or not invoice.taxAmount:
+        m_stacked = re.search(
+            r'Invoice\s+Subtotal\s*\n\s*Tax\s+Rate\s*\n\s*Sales\s+Tax\s*\n+'
+            r'\s*[A-Za-z]{0,3}\s?[$£€]?\s?([\d,\.]+)\s*\n'  # subtotal value
+            r'\s*(\d+(?:\.\d+)?)\s*%\s*\n'                    # tax rate
+            r'\s*[A-Za-z]{0,3}\s?[$£€]?\s?([\d,\.]+)',        # tax amount
+            clean_text, re.I
+        )
+        if m_stacked:
+            sub_val = safe_parse_float(m_stacked.group(1))
+            pct_val = float(m_stacked.group(2))
+            tax_val = safe_parse_float(m_stacked.group(3))
+            if sub_val and sub_val > 0 and not invoice.preTaxPrice:
+                invoice.preTaxPrice = sub_val
+            if pct_val and not invoice.taxPercent:
+                invoice.taxPercent = pct_val
+            if tax_val and tax_val > 0 and not invoice.taxAmount:
+                invoice.taxAmount = tax_val
+
+    if not invoice.taxPercent:
+        # "Tax (8%): $188" or "VAT: 14%" or "Tax Rate: 10%" or "Taxes (10%) $40"
+        # Also handle pipe-table: "| VAT | 14% |"
+        m = re.search(r'(?:Tax(?:es)?|VAT|Sales\s+Tax)(?:\s+Rate)?[\s|]*\(?\s*(\d+(?:\.\d+)?)\s*%', clean_text, re.I)
+        if m:
+            try:
+                invoice.taxPercent = float(m.group(1))
+            except ValueError:
+                pass
+    
+    if not invoice.preTaxPrice:
+        # "Subtotal: $2,350" or "Sub Total: 44,780" or "Invoice Subtotal: GBP 29,545"
+        # Tighten: use separator to allow pipe tables like "| Subtotal | $21,775 |"
+        m = re.search(r'(?:Sub\s*total|Invoice\s+Subtotal|Total\s+HT|Total\s+Ex\s+Tax)[:\s|]{1,10}[A-Za-z]{0,3}\s?[$£€]?\s?([\d,\.]+)', clean_text, re.I)
+        if m:
+            val = safe_parse_float(m.group(1))
+            if val and val > 0:
+                invoice.preTaxPrice = val
+    
+    if not invoice.taxAmount:
+        # "Tax Due: $3.00" or "Sales Tax: GBP 2,954" or "Tax (10%): $40" or "Export Tax: $650"
+        m = re.search(r'(?:Tax\s+Due|Sales\s+Tax|Export\s+Tax|Import\s+Tax|Total\s+TVA|(?:Tax(?:es)?|VAT)\s*\([^)]*\))[:\s|]{1,10}[A-Za-z]{0,3}\s?[$£€]?\s?([\d,\.]+)', clean_text, re.I)
+        if m:
+            val = safe_parse_float(m.group(1))
+            if val and val > 0:
+                invoice.taxAmount = val
+    
+    # Fallback: standalone "Tax $38.24" or "Tax: $38.24" (bold label without parens)
+    if not invoice.taxAmount:
+        m = re.search(r'\b(?:Tax|VAT)\b(?!\s*(?:Rate|Percent|Code|ID|Number|Invoice))[:\s]*\$?\s?([\d,\.]+)', clean_text, re.I)
+        if m:
+            val = safe_parse_float(m.group(1))
+            if val and val > 0:
+                invoice.taxAmount = val
+
+    # ===== TAX AMOUNT FALLBACK: Calculate from preTaxPrice * taxPercent =====
+    if not invoice.taxAmount and invoice.preTaxPrice and invoice.taxPercent:
+        invoice.taxAmount = round(invoice.preTaxPrice * invoice.taxPercent / 100, 2)
+
+    # ===== TOTAL FALLBACK: Subtotal + Tax when no explicit Total =====
+    if not invoice.totalAmount and invoice.preTaxPrice:
+        tax = invoice.taxAmount or 0
+        invoice.totalAmount = invoice.preTaxPrice + tax
+
+
 # Hàm gọi trong API_server.py
 def parse_invoice_block_based(raw_text: str) -> Invoice:
     invoice = Invoice()
+
+    # ===== EN COMMERCIAL INVOICE PRE-PARSER (runs first, VN-safe) =====
+    pre_parse_en_commercial(raw_text, invoice)
 
     lines = clean_lines(raw_text)
     blocks = detect_blocks(lines)
@@ -1876,8 +3039,234 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
     parse_table(blocks["table"], invoice)
     parse_total(blocks["total"], invoice)
     
+    # Fallback: if itemList is empty after block-based parsing,
+    # try parsing items from the FULL raw text (handles cases where
+    # items end up in total/header blocks due to keyword routing)
+    if not invoice.itemList:
+        from src.parsers.invoice_table_parser import parse_items_from_table
+        # Only scan text before ZOOM TEXT marker to avoid duplicates
+        text_for_items = raw_text.split('--- ZOOM TEXT ---')[0]
+        invoice.itemList = parse_items_from_table(text_for_items)
+    
+    # Fallback: Section-based items (e.g. Description/Quantity/Price/Amount in separate numbered sections)
+    if not invoice.itemList:
+        from src.schemas.invoice import InvoiceItem
+        text_for_sections = raw_text.split('--- ZOOM TEXT ---')[0]
+        _desc_vals, _qty_vals, _price_vals, _amt_vals = [], [], [], []
+        _section_header = None
+        for line in text_for_sections.split('\n'):
+            stripped = line.strip()
+            # Detect section headers like "14. Description of Goods" or "16. Unit price (USD)"
+            m_sec = re.match(r'^\d+\.\s+(.+)', stripped)
+            if m_sec:
+                _section_header = m_sec.group(1).lower()
+                continue
+            if not stripped or not _section_header:
+                if not stripped:
+                    _section_header = None
+                continue
+            # Classify content by section header (skip TOTAL sections)
+            if 'total' in _section_header and 'unit' not in _section_header:
+                continue  # Skip standalone TOTAL sections
+            if any(k in _section_header for k in ['description', 'goods', 'commodity']):
+                _desc_vals.append(stripped)
+            elif any(k in _section_header for k in ['quantity', 'qty']):
+                _qty_vals.append(re.sub(r'[^\d.,]', '', stripped))
+            elif any(k in _section_header for k in ['unit price', 'unit cost', 'price']):
+                _price_vals.append(re.sub(r'[^\d.,]', '', stripped))
+            elif any(k in _section_header for k in ['amount', 'am count']):
+                _amt_vals.append(re.sub(r'[^\d.,]', '', stripped))
+        # Build items from parallel arrays
+        if _desc_vals or _qty_vals or _price_vals or _amt_vals:
+            n = max(len(_desc_vals), len(_qty_vals), len(_price_vals), len(_amt_vals))
+            items = []
+            for i in range(n):
+                item = InvoiceItem()
+                if i < len(_desc_vals):
+                    item.productName = _desc_vals[i]
+                if i < len(_qty_vals):
+                    try: item.quantity = float(_qty_vals[i].replace(',', ''))
+                    except: pass
+                if i < len(_price_vals):
+                    try: item.unitPrice = float(_price_vals[i].replace(',', ''))
+                    except: pass
+                if i < len(_amt_vals):
+                    try: item.amount = float(_amt_vals[i].replace(',', ''))
+                    except: pass
+                if item.productName or item.quantity or item.unitPrice or item.amount:
+                    items.append(item)
+            if items:
+                invoice.itemList = items
+    
+    # Fallback 3: Numbered item descriptions (1., 2.) + separate Qty/Price blocks
+    # e.g. DHL template: "1. Populated PCB..." then later "10 Pcs." / "$USD 100.00"
+    if not invoice.itemList:
+        from src.schemas.invoice import InvoiceItem
+        text_for_items = raw_text.split('--- ZOOM TEXT ---')[0]
+        clean_text = re.sub(r'\*{1,2}', '', text_for_items)
+        
+        # Extract numbered item descriptions (multiline: collect until next number or separator)
+        item_descs = []
+        current_desc = None
+        for line in clean_text.split('\n'):
+            s = line.strip()
+            m_num = re.match(r'^(\d+)\.\s+(.+)', s)
+            if m_num:
+                if current_desc:
+                    item_descs.append(current_desc.strip())
+                current_desc = m_num.group(2)
+            elif current_desc and s and not s.startswith('---') and not re.match(r'^[\d,.$]+$', s):
+                # Continue multiline description (skip separators and pure numbers)
+                if not any(k in s.lower() for k in ['total', 'subtotal', 'pcs', 'shipping']):
+                    current_desc += ' ' + s
+        if current_desc:
+            item_descs.append(current_desc.strip())
+        
+        # Extract quantities: only match "X Pcs." at line start to avoid field reference numbers
+        qty_vals = []
+        price_vals = []
+        for line in clean_text.split('\n'):
+            s = line.strip()
+            m_qty = re.match(r'^(\d+)\s*(?:Pcs\.?|pcs\.?|units?|pieces?)\b', s, re.I)
+            if m_qty:
+                qty_vals.append(m_qty.group(1))
+            m_price = re.match(r'^\$\s*(?:USD\s*)?([\d,]+\.?\d*)$', s, re.I)
+            if m_price:
+                price_vals.append(m_price.group(1))
+        
+        # Only build items if we have descriptions AND at least qty or price
+        if item_descs and (qty_vals or price_vals):
+            # Filter out prices that match known totals/subtotals
+            filtered_prices = list(price_vals)
+            if invoice.totalAmount and filtered_prices:
+                filtered_prices = [p for p in filtered_prices if safe_parse_float(p) != invoice.totalAmount]
+            
+            items = []
+            for i, desc in enumerate(item_descs):
+                item = InvoiceItem()
+                item.productName = desc
+                if i < len(qty_vals):
+                    try: item.quantity = float(qty_vals[i])
+                    except: pass
+                if i < len(filtered_prices):
+                    try: item.unitPrice = safe_parse_float(filtered_prices[i])
+                    except: pass
+                if item.quantity and item.unitPrice:
+                    item.amount = item.quantity * item.unitPrice
+                items.append(item)
+            if items:
+                invoice.itemList = items
+    
     # Fallback: scan toàn bộ raw text cho các trường còn thiếu
     parse_global_fields(raw_text, invoice)
+    
+    # ---- BUYER FALLBACK: second **BoldName** block after seller ----
+    if not invoice.buyerName and invoice.sellerName and _is_en_invoice(raw_text):
+        _buyer_skip_labels = {'terms of sale', 'terms of payment', 'terms', 'notes',
+                              'invoice number', 'date', 'due', 'description',
+                              'subtotal', 'amount due', 'bank', 'payment'}
+        _buyer_skip_names = {'name', 'address', 'phone', 'email', 'from', 'to', 'date',
+                             'invoice', 'total', 'amount', 'tax'}
+        bold_blocks = list(re.finditer(r'\*\*([^*]+)\*\*', raw_text))
+        seller_found = False
+        for bm in bold_blocks:
+            val = bm.group(1).strip()
+            low_val = val.lower()
+            if low_val in _buyer_skip_labels or any(k in low_val for k in _buyer_skip_labels):
+                continue
+            if not seller_found:
+                if (val.lower().rstrip('.') == invoice.sellerName.lower().rstrip('.')
+                        or invoice.sellerName.lower() in val.lower()):
+                    seller_found = True
+                continue
+            if len(val) > 2 and val.lower().strip() not in _buyer_skip_names:
+                invoice.buyerName = val
+                # Get address from next line
+                rest = raw_text[bm.end():]
+                lines_after = rest.strip().split('\n')
+                if lines_after and not invoice.buyerAddress:
+                    addr_line = lines_after[0].strip()
+                    if (addr_line and len(addr_line) > 5
+                            and not addr_line.startswith('**')
+                            and not addr_line.startswith('|')
+                            and 'phone' not in addr_line.lower()[:6]):
+                        invoice.buyerAddress = addr_line
+                break
+    
+    # ---- BUYER FALLBACK: second text block before invoice header ----
+    # Pattern: SellerBlock\n\nBuyerBlock\n\n# INVOICE
+    if not invoice.buyerName and invoice.sellerName and _is_en_invoice(raw_text):
+        # Only search in text before ZOOM TEXT section
+        _text_for_buyer = raw_text.split('--- ZOOM TEXT ---')[0]
+        # Find the invoice title position
+        _inv_title_m = re.search(r'^[^\S\n]*#*[^\S\n]*(?:COMMERCIAL\s+)?(?:PRO\s*FORMA\s+)?INVOICE', _text_for_buyer, re.I | re.M)
+        if _inv_title_m:
+            pre_header_text = _text_for_buyer[:_inv_title_m.start()].strip()
+            # Split into blocks by blank lines or ---
+            _blocks = re.split(r'\n\s*\n|\n---\n', pre_header_text)
+            _blocks = [b.strip() for b in _blocks if b.strip()]
+            # If we have at least 2 blocks, the last one before the header is the buyer
+            if len(_blocks) >= 2:
+                buyer_block = _blocks[-1]
+                buyer_lines = [l.strip() for l in buyer_block.split('\n') if l.strip()]
+                if buyer_lines:
+                    # First line = buyer name, rest = address
+                    bname = buyer_lines[0]
+                    if len(bname) > 2 and bname.lower() != invoice.sellerName.lower():
+                        invoice.buyerName = bname
+                        if len(buyer_lines) > 1 and not invoice.buyerAddress:
+                            invoice.buyerAddress = ', '.join(buyer_lines[1:])
+    
+    # ---- POST-PROCESS: Clean markdown/table garbage from string fields ----
+    _clean_fields = ['sellerName', 'sellerAddress', 'buyerName', 'buyerAddress']
+    for field in _clean_fields:
+        val = getattr(invoice, field, None)
+        if not val:
+            continue
+        # Strip markdown headers
+        cleaned = re.sub(r'^[#]+\s*', '', val).strip()
+        # Strip markdown bold
+        cleaned = re.sub(r'\*\*([^*]+)\*\*', r'\1', cleaned)
+        # Reject pure table lines (|...|) but keep partial pipe content
+        if re.fullmatch(r'\|[^|]*\|(?:\s*\|[^|]*\|)*', cleaned):
+            # Extract first non-empty cell
+            cells = [c.strip() for c in cleaned.split('|') if c.strip()]
+            if cells and len(cells[0]) > 3:
+                cleaned = cells[0]
+            else:
+                setattr(invoice, field, None)
+                continue
+        # Remove leading pipe
+        if cleaned.startswith('|'):
+            cleaned = cleaned.lstrip('|').strip()
+        setattr(invoice, field, cleaned if cleaned else None)
+    
+    # Clean paymentMethod: strip leading bullet markers "- " or "* "
+    if invoice.paymentMethod:
+        pm = invoice.paymentMethod.strip()
+        pm = re.sub(r'^[-*]\s+', '', pm).strip()
+        invoice.paymentMethod = pm if pm else None
+    
+    # ---- POST-PROCESS: Fix OCR-truncated seller names ----
+    # If a longer company name appears in the text that ends with the current sellerName,
+    # use the longer version (OCR sometimes drops leading characters)
+    if invoice.sellerName and raw_text:
+        sn = invoice.sellerName.strip()
+        # Look for **CompanyName** or standalone company name in text
+        for m in re.finditer(r'\*\*([^*]{5,})\*\*', raw_text):
+            candidate = m.group(1).strip()
+            # Check if candidate ends with sellerName and is longer (has more leading chars)
+            if (candidate.endswith(sn) and len(candidate) > len(sn)
+                    and candidate.lower() != sn.lower()):
+                invoice.sellerName = candidate
+                break
+            # Also check if sellerName is a suffix of candidate (OCR dropped first chars)
+            if (sn in candidate and len(candidate) > len(sn) + 1
+                    and len(candidate) < len(sn) + 10):
+                # Verify it's the same company (shares significant overlap)
+                if candidate.endswith(sn[1:]):  # At least shares all but first char
+                    invoice.sellerName = candidate
+                    break
     
     # ---- FILTER GARBAGE ITEMS FROM itemList ----
     # Remove items that have:
@@ -1913,40 +3302,146 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
         
         invoice.itemList = cleaned_items
     
-    # Reverse fallback: if we have totalAmount but no invoiceTotalInWord, generate it
-    if invoice.totalAmount and not invoice.invoiceTotalInWord:
-        invoice.invoiceTotalInWord = number_to_vietnamese_words(invoice.totalAmount)
 
     # FINAL FALLBACK: "Max Number Strategy"
     # If totalAmount is missing or suspiciously equal to Tax Amount (e.g. 79400 vs 794000)
     # Check max number in raw text (or key blocks)
     # User insight: "The largest number in the table will definitely be totalAmount"
     if not invoice.totalAmount or (invoice.taxAmount and invoice.totalAmount <= invoice.taxAmount * 1.5):
-         from src.parsers.invoice_table_parser import safe_parse_float
-         all_nums = []
-         # Scan table and total blocks for numbers
-         scan_lines = blocks["table"] + blocks["total"]
-         for line in scan_lines:
-             # EXCLUDE lines with transaction codes, phone numbers, postal codes
-             low = line.lower()
-             if any(k in low for k in ["mã gd", "mã giao dịch", "tel", "phone", "fax",
-                                        "(+84)", "(+86)", "(+1)", "swift",
-                                        "account", "tài khoản", "postal",
-                                        "zip", "100000", "242000"]):
-                 continue
-             
-             nums = re.findall(r'[\d\.\,]+', line)
-             for n in nums:
-                 val = safe_parse_float(n)
-                 # Filter: > 1000 (minimum amount) and < 10 million (reasonable upper bound for fallback)
-                 # Tightened from 100B to 10M to exclude phone numbers (9+ digits)
-                 if val and val > 1000 and val < 10_000_000:
-                     all_nums.append(val)
-         
-         if all_nums:
-             max_val = max(all_nums)
-             if max_val > (invoice.totalAmount or 0):
-                 # print(f"DEBUG: Max Number Override: {invoice.totalAmount} -> {max_val}")
-                 invoice.totalAmount = max_val
+        all_nums = []
+        # Scan table and total blocks for numbers
+        scan_lines = blocks["table"] + blocks["total"]
+        
+        # Also get numbers from header to EXCLUDE them (like invoiceID)
+        header_nums = set()
+        for h_line in blocks["header"]:
+            for n in re.findall(r'[\d\.\,]+', h_line):
+                val = safe_parse_float(n)
+                if val: header_nums.add(val)
+        
+        # Extract digits from invoiceID to specifically exclude them
+        id_digits = "".join(re.findall(r'\d', invoice.invoiceID or ""))
+        id_val = safe_parse_float(id_digits) if id_digits else None
+
+        for line in scan_lines:
+            # EXCLUDE lines with transaction codes, phone numbers, postal codes
+            low = line.lower()
+            if any(k in low for k in ["mã gd", "mã giao dịch", "tel", "phone", "fax",
+                                       "(+84)", "(+86)", "(+1)", "swift",
+                                       "account", "tài khoản", "postal",
+                                       "zip", "100000", "242000",
+                                       "beneficiary", "bank information", "bank name",
+                                       "iban", "sort-code", "routing",
+                                       "customs tariff", "siret", "rcs ",
+                                       "invoice number", "ship-to", "ship to",
+                                       "hs code", "tariff no", "product code",
+                                       "hts code", "harm.code"]):
+                continue
+            
+            # Skip lines that contain HS code format numbers (e.g. 5403.20.00)
+            if re.search(r'\b\d{4}\.\d{2}\.\d{2}\b', line):
+                continue
+            
+            # Skip phone-number format lines: XX.XX.XX.XX.XX (e.g. "02.35.23.19.35")
+            # These have 4+ dot-separated 2-digit groups
+            if re.search(r'\b\d{2}\.\d{2}\.\d{2}\.\d{2}', line):
+                continue
+            
+            nums = re.findall(r'[\d\.\,]+', line)
+            for n in nums:
+                val = safe_parse_float(n)
+                # Filter: > 1000 (minimum amount)
+                # Lower limit for non-VN invoices to avoid phone numbers/long IDs
+                upper_limit = 10_000_000 if _is_en_invoice(raw_text) else 100_000_000_000
+                if val and val > 1000 and val < upper_limit:
+                    # Exclude if it matches a header number or the invoiceID digits
+                    if val not in header_nums and val != id_val:
+                        all_nums.append(val)
+        
+        if all_nums:
+            max_val = max(all_nums)
+            
+            # Heuristic: If we have totalAmount in word, use it to validate the max number
+            word_val = 0
+            if invoice.invoiceTotalInWord:
+                from src.parsers.block_invoice_parser import vietnamese_words_to_number
+                word_val = vietnamese_words_to_number(invoice.invoiceTotalInWord)
+            
+            # Also check if max_val is a known quantity in itemList
+            is_quantity = False
+            if invoice.itemList:
+                for item in invoice.itemList:
+                    if item.quantity == max_val and (item.amount is None or item.amount < max_val):
+                        is_quantity = True
+                        break
+            
+            if not is_quantity and (not word_val or abs(max_val - word_val) < 10):
+                # Also validate against item amounts — if max_val is much larger
+                # than item sum, it's likely a non-financial number (MARKS/NOS, etc.)
+                _item_sum_ok = True
+                if invoice.itemList:
+                    _isum = sum(it.amount or 0 for it in invoice.itemList)
+                    if _isum > 0 and max_val > _isum * 2:
+                        _item_sum_ok = False
+                        # Use item sum as totalAmount fallback
+                        if not invoice.totalAmount:
+                            invoice.totalAmount = _isum
+                if _item_sum_ok and max_val > (invoice.totalAmount or 0):
+                    invoice.totalAmount = max_val
+
+    # FINAL ITEM-SUM FALLBACK: if totalAmount is still missing, use sum of item amounts
+    if not invoice.totalAmount and invoice.itemList:
+        _item_total = sum(it.amount or 0 for it in invoice.itemList)
+        if _item_total > 0:
+            invoice.totalAmount = _item_total
+
+    # Reverse fallback: if we have totalAmount but no invoiceTotalInWord, generate it
+    if invoice.totalAmount and not invoice.invoiceTotalInWord:
+        if (invoice.currency or "").upper() == "VND":
+            invoice.invoiceTotalInWord = number_to_vietnamese_words(invoice.totalAmount)
+        else:
+            invoice.invoiceTotalInWord = number_to_english_words(invoice.totalAmount)
+
+    # FINAL CONSISTENCY CHECK: PreTax + Tax = Total
+    # If we have all 3 but they don't add up, try to find a consistent pair
+    if invoice.totalAmount:
+        total = invoice.totalAmount
+        pre = invoice.preTaxPrice
+        tax = invoice.taxAmount
+        
+        # Scenario 1: Pre + Tax != Total, but maybe one of them is wrong?
+        if pre and tax and abs(pre + tax - total) > (total * 0.01) + 10:
+            # Check if any other numbers in the block make it consistent
+            # Or if pre and tax are actually (Total - Tax) and (Tax)
+            # In Case 03: pre=29545, tax=29545, total=32499 -> wrong.
+            # But maybe we can find 2,954 somewhere?
+            
+            # Step: scan block again for a number 'x' such that pre + x = total or x + tax = total
+            scan_lines = blocks["table"] + blocks["total"]
+            all_block_nums = []
+            for line in scan_lines:
+                f_nums = re.findall(r'[\d\.\,]+', line)
+                for n in f_nums:
+                    v = safe_parse_float(n)
+                    if v and v > 0: all_block_nums.append(v)
+            
+            # Try to fix tax first (Total - Pre)
+            target_tax = total - (pre or 0)
+            if target_tax > 0:
+                for v in all_block_nums:
+                    if abs(v - target_tax) < (target_tax * 0.01) + 5:
+                        invoice.taxAmount = v
+                        tax = v
+                        break
+            
+            # Try to fix pre (Total - Tax)
+            if abs(pre + tax - total) > (total * 0.01) + 10:
+                target_pre = total - (tax or 0)
+                if target_pre > 0:
+                    for v in all_block_nums:
+                        if abs(v - target_pre) < (target_pre * 0.01) + 5:
+                            invoice.preTaxPrice = v
+                            pre = v
+                            break
 
     return invoice

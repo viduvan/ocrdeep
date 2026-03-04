@@ -1,0 +1,126 @@
+# ===========================
+# Data Files
+# ===========================
+Data.xlsx
+*.xlsx
+*.csv
+*.xls
+
+# ===========================
+# Test Files & Directories
+# ===========================
+test/
+tests/
+test_block_parser.py
+generate_test_cases.py
+
+# ===========================
+# Python
+# ===========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+*.whl
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ===========================
+# Virtual Environments
+# ===========================
+venv/
+.venv/
+env/
+.env
+ENV/
+
+# ===========================
+# IDE / Editor
+# ===========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+.classpath
+
+# ===========================
+# OS Generated Files
+# ===========================
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+*.bak
+
+# ===========================
+# Node.js (mathjax dependencies)
+# ===========================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# ===========================
+# Docker
+# ===========================
+.docker/
+
+# ===========================
+# Logs & Databases
+# ===========================
+*.log
+*.sqlite3
+*.db
+
+# ===========================
+# Test / Coverage
+# ===========================
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+
+# ===========================
+# Jupyter Notebook
+# ===========================
+.ipynb_checkpoints/
+
+# ===========================
+# Distribution / Packaging
+# ===========================
+*.manifest
+*.spec
+
+# ===========================
+# Model Files (large files)
+# ===========================
+*.onnx
+*.pt
+*.pth
+*.h5
+*.hdf5
+*.tflite
+*.pb
+*.ckpt
+*.safetensors
+
+# ===========================
+# Temporary & Debug Files
+# ===========================
+/tmp/
+*.bak
+*.orig
+debug_*.py
