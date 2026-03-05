@@ -20,7 +20,7 @@ def safe_parse_float(value: str) -> Optional[float]:
         return None
 
     # Strip common currency symbols before parsing
-    v = v.lstrip('$€£¥₹')
+    v = v.lstrip('$€£¥₹₩฿₺₽₱﷼')
     if not v:
         return None
 

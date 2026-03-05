@@ -1809,6 +1809,58 @@ def parse_total(block: List[str], invoice: Invoice):
             invoice.currency = "GBP"
         elif re.search(r'₹|\(INR\)|INR|rupee', block_text, re.I):
             invoice.currency = "INR"
+        elif re.search(r'₩|\bKRW\b|원', block_text, re.I):
+            invoice.currency = "KRW"
+        elif re.search(r'¥|\bCNY\b|\bRMB\b|人民币', block_text):
+            invoice.currency = "CNY"
+        elif re.search(r'\bJPY\b|円', block_text):
+            invoice.currency = "JPY"
+        elif re.search(r'฿|\bTHB\b|\bBaht\b', block_text, re.I):
+            invoice.currency = "THB"
+        elif re.search(r'₺|\bTRY\b|Türk\s*Lira', block_text, re.I):
+            invoice.currency = "TRY"
+        elif re.search(r'₽|\bRUB\b|рубл', block_text, re.I):
+            invoice.currency = "RUB"
+        elif re.search(r'₱|\bPHP\b|[Pp]eso', block_text):
+            invoice.currency = "PHP"
+        elif re.search(r'\bAUD\b|A\$', block_text):
+            invoice.currency = "AUD"
+        elif re.search(r'\bCAD\b|CA?\$', block_text):
+            invoice.currency = "CAD"
+        elif re.search(r'\bSGD\b|S\$', block_text):
+            invoice.currency = "SGD"
+        elif re.search(r'\bCHF\b|Fr\.|Franken', block_text, re.I):
+            invoice.currency = "CHF"
+        elif re.search(r'\bHKD\b|HK\$', block_text):
+            invoice.currency = "HKD"
+        elif re.search(r'\bTWD\b|NT\$', block_text):
+            invoice.currency = "TWD"
+        elif re.search(r'\bMYR\b|RM\s*\d', block_text):
+            invoice.currency = "MYR"
+        elif re.search(r'\bIDR\b|Rp\s*[\d.]', block_text):
+            invoice.currency = "IDR"
+        elif re.search(r'\bSEK\b|kr\b', block_text):
+            invoice.currency = "SEK"
+        elif re.search(r'\bNOK\b', block_text):
+            invoice.currency = "NOK"
+        elif re.search(r'\bDKK\b', block_text):
+            invoice.currency = "DKK"
+        elif re.search(r'\bNZD\b|NZ\$', block_text):
+            invoice.currency = "NZD"
+        elif re.search(r'\bZAR\b', block_text):
+            invoice.currency = "ZAR"
+        elif re.search(r'\bAED\b|[Dd]irham', block_text):
+            invoice.currency = "AED"
+        elif re.search(r'\bSAR\b|﷼|[Rr]iyal', block_text):
+            invoice.currency = "SAR"
+        elif re.search(r'\bBRL\b|R\$', block_text):
+            invoice.currency = "BRL"
+        elif re.search(r'\bMXN\b', block_text):
+            invoice.currency = "MXN"
+        elif re.search(r'\bPLN\b|zł', block_text, re.I):
+            invoice.currency = "PLN"
+        elif re.search(r'\bCZK\b|Kč', block_text, re.I):
+            invoice.currency = "CZK"
         elif re.search(r'VND|VNĐ|đồng', block_text, re.I):
             invoice.currency = "VND"
 
@@ -1978,6 +2030,189 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
         if re.search(r'\bGST\b|\bCGST\b|\bSGST\b|\bIGST\b', text_upper): inr_score += 4
         if inr_score > 0:
             scores['INR'] = inr_score
+
+        # KRW signals (Korean Won)
+        krw_score = 0
+        krw_score += raw_text.count('₩') * 3
+        if re.search(r'\bKRW\b', text_upper): krw_score += 5
+        if '원' in raw_text: krw_score += 4
+        if krw_score > 0:
+            scores['KRW'] = krw_score
+
+        # THB signals (Thai Baht)
+        thb_score = 0
+        thb_score += raw_text.count('฿') * 3
+        if re.search(r'\bTHB\b', text_upper): thb_score += 5
+        if re.search(r'\bBaht\b', raw_text, re.I): thb_score += 3
+        if thb_score > 0:
+            scores['THB'] = thb_score
+
+        # TRY signals (Turkish Lira)
+        try_score = 0
+        try_score += raw_text.count('₺') * 3
+        if re.search(r'\bTRY\b', text_upper): try_score += 5
+        if re.search(r'Türk\s*Lira|Turkish\s*Lira', raw_text, re.I): try_score += 4
+        if try_score > 0:
+            scores['TRY'] = try_score
+
+        # RUB signals (Russian Ruble)
+        rub_score = 0
+        rub_score += raw_text.count('₽') * 3
+        if re.search(r'\bRUB\b', text_upper): rub_score += 5
+        if re.search(r'рубл', raw_text, re.I): rub_score += 4
+        if rub_score > 0:
+            scores['RUB'] = rub_score
+
+        # PHP signals (Philippine Peso)
+        php_score = 0
+        php_score += raw_text.count('₱') * 3
+        if re.search(r'\bPHP\b', text_upper): php_score += 5
+        if re.search(r'\bPeso\b', raw_text, re.I): php_score += 2
+        if php_score > 0:
+            scores['PHP'] = php_score
+
+        # AUD signals (Australian Dollar)
+        aud_score = 0
+        if re.search(r'\bAUD\b', text_upper): aud_score += 5
+        if re.search(r'A\$\s*[\d,.]', raw_text): aud_score += 4
+        if re.search(r'Australian\s*Dollar', raw_text, re.I): aud_score += 4
+        if aud_score > 0:
+            scores['AUD'] = aud_score
+
+        # CAD signals (Canadian Dollar)
+        cad_score = 0
+        if re.search(r'\bCAD\b', text_upper): cad_score += 5
+        if re.search(r'CA?\$\s*[\d,.]', raw_text): cad_score += 4
+        if re.search(r'Canadian\s*Dollar', raw_text, re.I): cad_score += 4
+        if cad_score > 0:
+            scores['CAD'] = cad_score
+
+        # SGD signals (Singapore Dollar)
+        sgd_score = 0
+        if re.search(r'\bSGD\b', text_upper): sgd_score += 5
+        if re.search(r'S\$\s*[\d,.]', raw_text): sgd_score += 4
+        if re.search(r'Singapore\s*Dollar', raw_text, re.I): sgd_score += 4
+        if sgd_score > 0:
+            scores['SGD'] = sgd_score
+
+        # CHF signals (Swiss Franc)
+        chf_score = 0
+        if re.search(r'\bCHF\b', text_upper): chf_score += 5
+        if re.search(r'\bFr\.\s*[\d,.]', raw_text): chf_score += 3
+        if re.search(r'Franken|Swiss\s*Franc', raw_text, re.I): chf_score += 4
+        if chf_score > 0:
+            scores['CHF'] = chf_score
+
+        # HKD signals (Hong Kong Dollar)
+        hkd_score = 0
+        if re.search(r'\bHKD\b', text_upper): hkd_score += 5
+        if re.search(r'HK\$\s*[\d,.]', raw_text): hkd_score += 4
+        if re.search(r'Hong\s*Kong\s*Dollar', raw_text, re.I): hkd_score += 4
+        if hkd_score > 0:
+            scores['HKD'] = hkd_score
+
+        # TWD signals (Taiwan Dollar)
+        twd_score = 0
+        if re.search(r'\bTWD\b', text_upper): twd_score += 5
+        if re.search(r'NT\$\s*[\d,.]', raw_text): twd_score += 4
+        if re.search(r'Taiwan\s*Dollar|新臺幣', raw_text, re.I): twd_score += 4
+        if twd_score > 0:
+            scores['TWD'] = twd_score
+
+        # MYR signals (Malaysian Ringgit)
+        myr_score = 0
+        if re.search(r'\bMYR\b', text_upper): myr_score += 5
+        if re.search(r'\bRM\s*[\d,.]', raw_text): myr_score += 4
+        if re.search(r'Ringgit', raw_text, re.I): myr_score += 3
+        if myr_score > 0:
+            scores['MYR'] = myr_score
+
+        # IDR signals (Indonesian Rupiah)
+        idr_score = 0
+        if re.search(r'\bIDR\b', text_upper): idr_score += 5
+        if re.search(r'\bRp\s*[\d.]', raw_text): idr_score += 4
+        if re.search(r'Rupiah', raw_text, re.I): idr_score += 3
+        if idr_score > 0:
+            scores['IDR'] = idr_score
+
+        # Scandinavian currencies
+        sek_score = 0
+        if re.search(r'\bSEK\b', text_upper): sek_score += 5
+        if re.search(r'Swedish\s*Kr', raw_text, re.I): sek_score += 4
+        if sek_score > 0:
+            scores['SEK'] = sek_score
+
+        nok_score = 0
+        if re.search(r'\bNOK\b', text_upper): nok_score += 5
+        if re.search(r'Norwegian\s*Kr', raw_text, re.I): nok_score += 4
+        if nok_score > 0:
+            scores['NOK'] = nok_score
+
+        dkk_score = 0
+        if re.search(r'\bDKK\b', text_upper): dkk_score += 5
+        if re.search(r'Danish\s*Kr', raw_text, re.I): dkk_score += 4
+        if dkk_score > 0:
+            scores['DKK'] = dkk_score
+
+        # NZD signals (New Zealand Dollar)
+        nzd_score = 0
+        if re.search(r'\bNZD\b', text_upper): nzd_score += 5
+        if re.search(r'NZ\$\s*[\d,.]', raw_text): nzd_score += 4
+        if nzd_score > 0:
+            scores['NZD'] = nzd_score
+
+        # ZAR signals (South African Rand)
+        zar_score = 0
+        if re.search(r'\bZAR\b', text_upper): zar_score += 5
+        if re.search(r'\bRand\b', raw_text, re.I): zar_score += 3
+        if zar_score > 0:
+            scores['ZAR'] = zar_score
+
+        # AED signals (UAE Dirham)
+        aed_score = 0
+        if re.search(r'\bAED\b', text_upper): aed_score += 5
+        if re.search(r'Dirham', raw_text, re.I): aed_score += 3
+        if aed_score > 0:
+            scores['AED'] = aed_score
+
+        # SAR signals (Saudi Riyal)
+        sar_score = 0
+        if re.search(r'\bSAR\b', text_upper): sar_score += 5
+        if '﷼' in raw_text: sar_score += 3
+        if re.search(r'Riyal', raw_text, re.I): sar_score += 3
+        if sar_score > 0:
+            scores['SAR'] = sar_score
+
+        # BRL signals (Brazilian Real)
+        brl_score = 0
+        if re.search(r'\bBRL\b', text_upper): brl_score += 5
+        if re.search(r'R\$\s*[\d,.]', raw_text): brl_score += 4
+        if re.search(r'\bReal\b|\bReais\b', raw_text, re.I): brl_score += 3
+        if brl_score > 0:
+            scores['BRL'] = brl_score
+
+        # MXN signals (Mexican Peso)
+        mxn_score = 0
+        if re.search(r'\bMXN\b', text_upper): mxn_score += 5
+        if re.search(r'Mexican\s*Peso', raw_text, re.I): mxn_score += 4
+        if mxn_score > 0:
+            scores['MXN'] = mxn_score
+
+        # PLN signals (Polish Zloty)
+        pln_score = 0
+        if re.search(r'\bPLN\b', text_upper): pln_score += 5
+        if 'zł' in raw_text or 'ZŁ' in raw_text: pln_score += 4
+        if re.search(r'Zlot', raw_text, re.I): pln_score += 3
+        if pln_score > 0:
+            scores['PLN'] = pln_score
+
+        # CZK signals (Czech Koruna)
+        czk_score = 0
+        if re.search(r'\bCZK\b', text_upper): czk_score += 5
+        if 'Kč' in raw_text: czk_score += 4
+        if re.search(r'Koruna', raw_text, re.I): czk_score += 3
+        if czk_score > 0:
+            scores['CZK'] = czk_score
 
         if scores:
             # Pick the currency with the highest confidence score
@@ -2865,7 +3100,10 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
                         # Also extract currency from other cells
                         for _vc in _vcells[1:]:
                             _vc_clean = _vc.strip().strip('*').strip()
-                            if _vc_clean in ('USD', 'EUR', 'GBP', 'JPY', 'VND', 'AUD', 'CAD', 'SGD') and not invoice.currency:
+                            if _vc_clean in ('USD', 'EUR', 'GBP', 'JPY', 'VND', 'AUD', 'CAD', 'SGD',
+                                             'CHF', 'HKD', 'TWD', 'KRW', 'THB', 'MYR', 'IDR', 'PHP',
+                                             'SEK', 'NOK', 'DKK', 'NZD', 'ZAR', 'AED', 'SAR', 'BRL',
+                                             'MXN', 'PLN', 'CZK', 'TRY', 'RUB', 'INR', 'CNY') and not invoice.currency:
                                 invoice.currency = _vc_clean
                 else:
                     break
@@ -4322,7 +4560,10 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
         "despatch mode", "parcel nr", "gross weight",
     ]
     # Also filter items where productName is just a currency code
-    CURRENCY_CODES = {"usd", "eur", "gbp", "vnd", "jpy", "cny"}
+    CURRENCY_CODES = {"usd", "eur", "gbp", "vnd", "jpy", "cny", "inr",
+                       "aud", "cad", "sgd", "chf", "hkd", "twd", "krw", "thb",
+                       "myr", "idr", "php", "sek", "nok", "dkk", "nzd", "zar",
+                       "aed", "sar", "brl", "mxn", "pln", "czk", "try", "rub"}
     # Summary/total row labels that should not be line items
     SUMMARY_KEYWORDS = [
         "sub total", "subtotal", "grand total", "total", "tax total",
