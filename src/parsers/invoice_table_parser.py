@@ -20,7 +20,7 @@ def safe_parse_float(value: str) -> Optional[float]:
         return None
 
     # Strip common currency symbols before parsing
-    v = v.lstrip('$€£¥')
+    v = v.lstrip('$€£¥₹')
     if not v:
         return None
 
@@ -129,23 +129,28 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
     items: List[InvoiceItem] = []
     
     field_keywords = {
-        "stt": ["stt", "item no", "item id", "#", "marks"],
+        "stt": ["stt", "item no", "item id", "#", "marks", "sl. no", "sl no"],
         "name": ["tên hàng", "description", "tên sản phẩm", "diễn giải", "hàng hóa", "nhãn hiệu", "quy cách", "phẩm chất",
-                 "specifications", "规格", "product", "material description",
+                 "specifications", "specification", "规格", "product", "material description",
                  "goods", "commodity", "items", "item"],
         "code": ["mã số", "mã hàng", "mã sp", "product code", "code", "hs code", "tariff",
                  "harm.code", "hts code"],
-        "price": ["đơn giá", "unit price", "单价", "unit value", "rate",
-                  "unit cost", "u.price", "price"],
+        # tax_rate MUST come BEFORE price to avoid "Tax Rate" matching "rate" in price
+        "tax_rate": ["thuế suất", "tax rate", "vat rate", "vat%", "tax (%)"],
+        # tax_amt MUST come BEFORE amount to avoid "Tax Amount" matching "amount"
         "tax_amt": ["tiền thuế", "tax amount", "vat amount"],
-        "amount": ["thành tiền", "amount", "trị giá", "总计", "total value",
+        "price": ["đơn giá", "unit price", "单价", "unit value", "rate",
+                  "unit cost", "u.price", "price",
+                  "unit (usd)", "unit (eur)", "unit (gbp)", "unit ($)", "unit (€)", "unit (£)",
+                  "pate"],
+        "amount": ["thành tiền", "amount", "atmount", "trị giá", "总计", "total value",
                    "total price", "line total", "total ($)", "total (£)",
-                   "tol.amount", "total gross", "value in", "net value"],
+                   "tol.amount", "total gross", "value in", "net value", "value",
+                   "total (usd)", "total (eur)", "total (gbp)", "total (€)"],
         # qty MUST come BEFORE unit to avoid "NO.OF UNIT" matching "unit" first
         "qty": ["số lượng", "sl", "quantity", "qty", "数量", "no.of unit", "no. of unit",
                 "hrs/qty", "pcs"],
         "unit": ["đvt", "đơn vị", "unit of measure"],
-        "tax_rate": ["thuế suất", "tax rate", "vat rate", "vat%", "tax (%)"],
         "payment": ["thành tiền sau thuế", "cộng tiền thanh toán", "tổng cộng"],
         "currency_col": ["currency", "货号"],
         "discount": ["discounts", "discount", "chiết khấu", "giảm giá"],
@@ -164,8 +169,16 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
         if stripped.startswith('|'):
             joined_lines.append(line)
         elif joined_lines and not stripped.startswith('---') and stripped:
-            # Continuation line — append to previous pipe-table row
-            joined_lines[-1] = joined_lines[-1].rstrip() + ' ' + stripped
+            # Only treat as continuation if it looks like cell content (not a heading/label)
+            # Section headings like "Invoice Summary" should NOT be merged
+            _looks_like_heading = (len(stripped.split()) <= 3 and stripped[0].isupper()
+                                   and '|' not in stripped and ':' not in stripped
+                                   and not re.search(r'\d', stripped))
+            if _looks_like_heading:
+                joined_lines.append(line)
+            else:
+                # Continuation line — append to previous pipe-table row
+                joined_lines[-1] = joined_lines[-1].rstrip() + ' ' + stripped
         else:
             joined_lines.append(line)
     lines = joined_lines
@@ -204,6 +217,15 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
                 if low.strip() == 'name' or low.strip() == 'product name':
                     detected_map[logical_idx] = 'name'
                     matches += 1
+                # Fallback: "total" in column name → amount (if not weight/qty related)
+                elif 'total' in low:
+                    _weight_words = {'weight', 'kg', 'lb', 'lbs', 'quantity', 'qty', 'pcs', 'units'}
+                    _col_words = set(re.findall(r'\w+', low))
+                    # "Subtotal" in first column is typically a description column, not amount
+                    _is_subtotal_first = (low.strip() == 'subtotal' and logical_idx == 0)
+                    if not _col_words.intersection(_weight_words) and not _is_subtotal_first:
+                        detected_map[logical_idx] = 'amount'
+                        matches += 1
             
             logical_idx += 1
         
@@ -277,6 +299,41 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
         # Check if first row looks like a header (text columns)
         # If not, maybe data starts immediately?
         pass
+    
+    # POST-PROCESS: If column 0 is unmapped and no 'name' exists, infer col 0 as 'name'
+    if header_map and 'name' not in header_map.values() and 0 not in header_map:
+        header_map[0] = 'name'
+        print(f"  Inferred col 0 as name: {header_map}")
+    
+    # FIX: Detect header-data column misalignment
+    # When header has N cols but data rows consistently have N+1 cols,
+    # and first data col is text (name/description), shift header_map right by 1
+    if header_map and 'name' not in header_map.values():
+        header_col_count = max(header_map.keys()) + 1
+        # Sample up to 3 data rows
+        _sample_rows = []
+        for _sl in lines[data_start_idx:]:
+            if '|' not in _sl or set(_sl.strip()).issubset({'|', '-', ' ', ':', '+'}):
+                continue
+            _sc = [c.strip() for c in _sl.strip().strip('|').split('|')]
+            if len(_sc) >= 2:
+                _sample_rows.append(_sc)
+            if len(_sample_rows) >= 3:
+                break
+        if _sample_rows:
+            _avg_data_cols = sum(len(r) for r in _sample_rows) / len(_sample_rows)
+            # If data has 1+ more cols than header, and first col looks like text
+            if _avg_data_cols >= header_col_count + 0.8:
+                _first_cols_are_text = all(
+                    not re.match(r'^[\$€£]?\s*[\d,\.]+$', r[0].strip()) and len(r[0].strip()) > 2
+                    for r in _sample_rows if r[0].strip()
+                )
+                if _first_cols_are_text:
+                    # Shift header_map right by 1, add name at 0
+                    shifted = {k + 1: v for k, v in header_map.items()}
+                    shifted[0] = 'name'
+                    header_map = shifted
+                    print(f"  Header shifted: {header_map}")
 
     # 2. Parse data rows
     for line in lines[data_start_idx:]:
@@ -305,15 +362,24 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
                 "total amount", "total value", "total this page",
                 "consignment total", "invoice total",
                 "shipping", "customs/duties", "insurance",
-                "other information", "payment",
+                "other information",
                 # EN summary/note rows
                 "total vat", "taxfree", "vat on", "a taxfree",
                 "due date", "total net value", "total net",
                 "§6 ustg", "$6 ustg", "ustg", "exporter",
+                "tax due", "tax (", "payment due", "thank you",
+                "message", "balance due",
             ]
             # First column check (broad — this is where summary labels usually appear)
-            if any(k in first_low for k in summary_keywords):
+            # Only apply to short label-like columns; long descriptions may contain 'total' embedded
+            if len(first_low) < 60 and any(k in first_low for k in summary_keywords):
                 continue
+            # Also check name column if first column is empty (e.g., |  | In Total | ...)
+            _name_col_idx = next((k for k, v in header_map.items() if v == 'name'), None)
+            if not first_low and _name_col_idx is not None and _name_col_idx < len(cols):
+                _name_low = cols[_name_col_idx].lower().strip().strip('*').strip()
+                if len(_name_low) < 60 and any(k in _name_low for k in summary_keywords):
+                    continue
             
             # Also scan OTHER columns for specific multi-word summary phrases
             # (specific to avoid false positives when 'total gross' appears in data rows)
@@ -363,6 +429,21 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
         if is_subheader:
             continue
 
+        # SKIP SUMMARY/TOTAL ROWS: "TOTAL", "SUBTOTAL", "GRAND TOTAL", etc.
+        _first_col = cols[0].strip().strip('*').lower() if cols else ''
+        _summary_kws = ['total', 'subtotal', 'sub total', 'grand total', 'tổng cộng',
+                        'tổng', 'cộng', 'tổng tiền', 'balance due', 'amount due']
+        if _first_col in _summary_kws or (not _first_col and len(cols) > 1 and cols[1].strip().strip('*').lower() in _summary_kws):
+            continue
+        
+        # Skip total-in-words rows: "US DOLLARS SIXTY FIVE THOUSAND..."
+        # Skip deduction/pct rows: "DEDUCTION OF ADVANCE PAYMENT", "100 PCT. VALUE..."
+        if _first_col and any(_first_col.startswith(k) for k in ['us dollar', 'say:', 'say ', 'in words',
+                                                                    'deduction']):
+            continue
+        if _first_col and re.search(r'\bpct\.?\b', _first_col):
+            continue
+
         # SKIP GARBAGE ROW: (1) | (2) | (3)...
         # Check if all columns are essentially numbers wrapped in parens or just numbers/formulas
         # e.g. (1), 1, (2), 2, (7=4x5)
@@ -396,7 +477,13 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
             for idx, field in header_map.items():
                 if idx < len(cols):
                     val = cols[idx]
-                    if field == "name": item.productName = val
+                    if field == "name":
+                        # Concatenate multiple name columns (e.g. Name + Description)
+                        if val and val.strip():
+                            if item.productName:
+                                item.productName = item.productName + ' ' + val
+                            else:
+                                item.productName = val
                     elif field == "code": item.productCode = val
                     elif field == "unit": 
                         # Sanitize: If unit looks like a number (large), it's likely a misaligned Amount
@@ -414,6 +501,40 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
                         else:
                             item.discountPercent = val
                     elif field == "payment": item.payment = safe_parse_float(val)
+            
+            # Fix: when data row has fewer cells than header (e.g., empty Tax col collapsed),
+            # try the last cell as 'amount' if it looks like money
+            if not item.amount and 'amount' in header_map.values():
+                _amt_idx = [k for k, v in header_map.items() if v == 'amount']
+                if _amt_idx and _amt_idx[0] >= len(cols) and len(cols) > 0:
+                    _last_cell = cols[-1]
+                    _amt_val = safe_parse_float(_last_cell)
+                    if _amt_val is not None and _amt_val > 0:
+                        item.amount = _amt_val
+            
+            # Misaligned data fix: if data row has more columns than header,
+            # check if trailing extra columns contain price/amount values
+            max_header_idx = max(header_map.keys()) if header_map else 0
+            if len(cols) > max_header_idx + 1:  # At least 1 extra column
+                extra_cols = cols[max_header_idx + 1:]
+                # Check if extra cols look like price/amount (contain /KG, $, or are numbers)
+                for ec in extra_cols:
+                    ec_stripped = ec.strip()
+                    if '/' in ec_stripped and re.search(r'\d', ec_stripped):
+                        # Looks like unit price: "2.62/KG"
+                        price_val = safe_parse_float(re.sub(r'/.*', '', ec_stripped))
+                        if price_val is not None:
+                            item.unitPrice = price_val
+                    else:
+                        # Handle European format with space thousands: "1 297,45"
+                        _ec_clean = re.sub(r'\s+', '', ec_stripped)  # Remove spaces
+                        if re.match(r'^[\$€£¥]?[\d,\.]+$', _ec_clean):
+                            amt_val = safe_parse_float(_ec_clean)
+                            if amt_val is not None and amt_val > (item.amount or 0):
+                                # Move current amount to unitPrice if missing
+                                if item.amount and not item.unitPrice:
+                                    item.unitPrice = item.amount
+                                item.amount = amt_val
 
         else:
             # Fallback: Assume standard position 
@@ -474,8 +595,13 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
                      items.append(item)
             elif is_col_number_row and item.amount and (item.unitPrice or item.quantity):
                 # Item with numeric name (product code) may still carry valid price/qty data
-                # Keep it with the code as name temporarily (continuation row may follow)
-                items.append(item)
+                # But NOT if name is a summary keyword (In Total, Grand Total, etc.)
+                _is_summary_name = pname_low in ["total", "subtotal", "sub total", "grand total",
+                                                   "total amount", "tổng cộng", "cộng", "tổng",
+                                                   "in total", "total value", "-", "—"]
+                if not _is_summary_name:
+                    # Keep it with the code as name temporarily (continuation row may follow)
+                    items.append(item)
 
     # Deduplicate: remove items with identical (productName, qty, amount, unitPrice)
     seen = set()
@@ -577,6 +703,152 @@ def parse_structured_items(raw_text: str) -> List[InvoiceItem]:
     if found_label_pattern and items:
         return items
 
+    # --- Pattern 1b: Columnar bold headers then values ---
+    # **Description** / **Quantity** / **Unit Price** / **Total Price** on consecutive lines
+    # then blank line, then **Product 1** / 1 / 50 / $50.00 on consecutive lines
+    all_field_labels = {
+        'name': ['description', 'product', 'goods', 'product name', 'item'],
+        'qty': ['quantity', 'qty', 'number of packages'],
+        'weight': ['weight', 'net weight', 'gross weight'],
+        'price': ['unit price', 'unit-price', 'price', 'rate'],
+        'amount': ['total price', 'total', 'amount', 'total amount'],
+    }
+    
+    # Scan for a block of consecutive bold labels
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        clean = re.sub(r'\*\*([^*]+)\*\*', r'\1', line).strip()
+        low = clean.lower()
+        
+        # Check if this looks like a known field label
+        matched_type = None
+        for ftype, labels in all_field_labels.items():
+            if any(low == lbl or low == lbl + ':' for lbl in labels):
+                matched_type = ftype
+                break
+        
+        if matched_type:
+            # Collect consecutive labels
+            col_order = [matched_type]
+            j = i + 1
+            while j < len(lines):
+                lline = lines[j].strip()
+                lclean = re.sub(r'\*\*([^*]+)\*\*', r'\1', lline).strip()
+                llow = lclean.lower()
+                if not lline:
+                    break  # blank line = end of header block
+                lt = None
+                for ftype, labels in all_field_labels.items():
+                    if any(llow == lbl or llow == lbl + ':' for lbl in labels):
+                        lt = ftype
+                        break
+                if lt:
+                    col_order.append(lt)
+                    j += 1
+                else:
+                    break
+            
+            # Need at least 2 column headers (e.g., Description + Quantity)
+            if len(col_order) >= 2 and 'name' in col_order:
+                # Skip blank lines
+                while j < len(lines) and not lines[j].strip():
+                    j += 1
+                
+                # Collect data blocks (items separated by blank lines)
+                while j < len(lines):
+                    data_vals = []
+                    while j < len(lines) and lines[j].strip():
+                        val_line = re.sub(r'\*\*([^*]+)\*\*', r'\1', lines[j].strip()).strip()
+                        # Stop at summary labels
+                        vlow = val_line.lower()
+                        if any(k in vlow for k in ['other information', 'subtotal', 'tax rate',
+                                                     'tax due', 'signature', 'total', 'notes']):
+                            break
+                        data_vals.append(val_line)
+                        j += 1
+                    
+                    if data_vals and len(data_vals) >= 2:
+                        item = InvoiceItem()
+                        for idx, col_type in enumerate(col_order):
+                            if idx >= len(data_vals):
+                                break
+                            val = data_vals[idx]
+                            if col_type == 'name':
+                                item.productName = val
+                            elif col_type == 'qty':
+                                item.quantity = parse_quantity(val)
+                            elif col_type == 'price':
+                                item.unitPrice = safe_parse_float(val)
+                            elif col_type == 'amount':
+                                item.amount = safe_parse_float(val)
+                        if item.productName:
+                            items.append(item)
+                    
+                    # Skip blank lines between items
+                    while j < len(lines) and not lines[j].strip():
+                        j += 1
+                    # Check if next block is still data (not a label/summary)
+                    if j < len(lines):
+                        next_clean = re.sub(r'\*\*([^*]+)\*\*', r'\1', lines[j].strip()).strip().lower()
+                        if any(k in next_clean for k in ['other information', 'subtotal', 'tax',
+                                                          'signature', 'total', 'notes']):
+                            break
+                
+                if items:
+                    return items
+        i += 1
+
+    # --- Pattern 1c: Sequential heading-based items after "Product Code" ---
+    # Format: ### Product Code\n2216\n### Lightbulb 2 x 37 watt\n1000\n### Elecwire 20m\n450
+    # Only fires after finding "Product Code" marker, stops at aggregate labels
+    if not items:
+        _stop_labels = {'unit quantity', 'quantity', 'price', 'unit price', 'amount',
+                        'total', 'total amount', 'total this page', 'consignment total',
+                        'invoice total', 'additional information', 'bank details',
+                        'place and date of issue', 'signature company', 'signature',
+                        'name of authorized signatory'}
+        # Find "Product Code" line
+        start_idx = None
+        for idx, line in enumerate(lines):
+            clean_l = re.sub(r'^#+\s*', '', line.strip())
+            clean_l = re.sub(r'\*\*([^*]+)\*\*', r'\1', clean_l).strip()
+            if clean_l.lower() == 'product code' and idx + 1 < len(lines):
+                # Skip the Product Code value line
+                start_idx = idx + 2
+                break
+        
+        if start_idx is not None:
+            i = start_idx
+            while i < len(lines) - 1:
+                line = lines[i].strip()
+                clean = re.sub(r'^#+\s*', '', line)
+                clean = re.sub(r'\*\*([^*]+)\*\*', r'\1', clean).strip()
+                low = clean.lower()
+                # Stop at aggregate/summary labels
+                if low in _stop_labels or line == '---':
+                    break
+                # Skip pipe table lines
+                if line.startswith('|') or not clean:
+                    i += 1
+                    continue
+                # Check if next line is a pure number (the amount)
+                next_line = lines[i + 1].strip()
+                next_clean = re.sub(r'^#+\s*', '', next_line).strip()
+                next_val = safe_parse_float(next_clean)
+                if next_val is not None and next_val > 0 and not next_line.startswith('|'):
+                    # Only count if the name has letters and isn't a known label
+                    if re.search(r'[A-Za-z]', clean) and len(clean) > 2 and low not in _stop_labels:
+                        item = InvoiceItem()
+                        item.productName = clean
+                        item.amount = next_val
+                        items.append(item)
+                        i += 2
+                        continue
+                i += 1
+            if items:
+                return items
+
     # --- Pattern 2: Freeform product lines with amounts ---
     # Lines like: "COCONUT SAP AND EXTRACT (CLASS A)\n16,200KG\nUSD 0.60/KG\nUSD 9,720"
     # Or: "1. FROZEN CHICKEN MDM\n  20KG × 2,000CARTONS\n  46,000KG\n  USD 0.65\n  USD 29,900"
@@ -599,9 +871,12 @@ def parse_structured_items(raw_text: str) -> List[InvoiceItem]:
         clean = line.strip()
         if not clean:
             if pending_item and pending_item.productName:
-                items.append(pending_item)
-                pending_item = None
-                pending_name = None
+                # Don't finalize if still missing amount — item data may continue after blank line
+                if pending_item.amount:
+                    items.append(pending_item)
+                    pending_item = None
+                    pending_name = None
+                # else: keep pending through blank line
             continue
 
         # Skip separators, headers, summary rows
@@ -626,8 +901,10 @@ def parse_structured_items(raw_text: str) -> List[InvoiceItem]:
         if pending_item:
             # Try to extract qty
             qm = qty_pattern.search(clean)
-            if qm and not pending_item.quantity:
-                pending_item.quantity = parse_quantity(qm.group(1))
+            if qm:
+                new_qty = parse_quantity(qm.group(1))
+                if new_qty and (not pending_item.quantity or new_qty > pending_item.quantity):
+                    pending_item.quantity = new_qty
 
             # Try to extract amount/price
             am = amount_pattern.search(clean)
@@ -638,6 +915,11 @@ def parse_structured_items(raw_text: str) -> List[InvoiceItem]:
                         # "USD 0.65/KG" = unit price
                         pending_item.unitPrice = val
                     elif not pending_item.amount:
+                        pending_item.amount = val
+                    elif pending_item.amount and val > pending_item.amount * 10:
+                        # New value much larger → current amount was actually unitPrice
+                        if not pending_item.unitPrice:
+                            pending_item.unitPrice = pending_item.amount
                         pending_item.amount = val
                     elif not pending_item.unitPrice:
                         pending_item.unitPrice = val
