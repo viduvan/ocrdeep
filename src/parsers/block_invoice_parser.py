@@ -2253,8 +2253,11 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
                 # Pattern 2: Old complex pattern fallback (but NOT "Số biên bản")
                 m = re.search(r'(?<!biên bản\s)Số\s*(?:\([^)]*\))?\s*[:\s]*\**(\d+)\**', raw_text, re.I)
                 if m:
-                    val = m.group(1).lstrip('0') or m.group(1)
-                    invoice.invoiceID = val
+                    # Extra check: reject if preceded by 'Địa chỉ', 'Address', or address context
+                    _before_match2 = raw_text[max(0, m.start()-80):m.start()]
+                    if not re.search(r'(?:địa chỉ|address|add\.|tầng|phố|phường|đường|ngõ|ngách|thôn|xã|quận|huyện)', _before_match2, re.I):
+                        val = m.group(1).lstrip('0') or m.group(1)
+                        invoice.invoiceID = val
                 
                 # Pattern 3: Invoice No: 721 hoặc Invoice No.: 721
                 if not invoice.invoiceID:

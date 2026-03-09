@@ -1053,14 +1053,18 @@ def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
                     invoice.invoiceFormNo = m.group(1)
 
         # --- Invoice ID (VN: Số ...: ####) ---
-        contains_keyword = ("số" in low or "no" in low or "so" in low) and ":" in low
+        # AUTHORITATIVE: Zoom text "Số:" with explicit label overrides block parser value
+        # because block parser may falsely match "số 18" from addresses
+        contains_keyword = ("số" in low or "so" in low) and ":" in low
         is_clean = (
             "tài khoản" not in low and "tiền" not in low and
             "thuế" not in low and "điện thoại" not in low and
-            "địa chỉ" not in low and "address" not in low
+            "địa chỉ" not in low and "address" not in low and
+            "đơn hàng" not in low and "cửa hàng" not in low
         )
-        if contains_keyword and is_clean and not invoice.invoiceID:
-            m = re.search(r"(?:Số|So|No).*?[:\s]\s*\*{0,2}(\d+)\*{0,2}", line, re.I)
+        if contains_keyword and is_clean:
+            # Only match standalone "Số:" label (not embedded in other text like "Mã số thuế")
+            m = re.search(r"(?:^|\s)(?:Số|So)\s*(?:\([^)]*\))?\s*:\s*\*{0,2}(\d+)\*{0,2}", clean, re.I)
             if m:
                 invoice.invoiceID = m.group(1)
 
