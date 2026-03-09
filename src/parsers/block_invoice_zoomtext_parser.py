@@ -1063,8 +1063,10 @@ def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
             "đơn hàng" not in low and "cửa hàng" not in low
         )
         if contains_keyword and is_clean:
-            # Only match standalone "Số:" label (not embedded in other text like "Mã số thuế")
-            m = re.search(r"(?:^|\s)(?:Số|So)\s*(?:\([^)]*\))?\s*:\s*\*{0,2}(\d+)\*{0,2}", clean, re.I)
+            # Strip ALL asterisk markers for robust matching (handles nested bold like **Số *(Invoice No.)*: 00000438**)
+            _clean_no_stars = re.sub(r'\*+', '', clean).strip()
+            # Match standalone "Số" label with optional parenthetical annotation
+            m = re.search(r"(?:^|\s)(?:Số|So)\s*(?:\([^)]*\))?\s*:\s*(\d+)", _clean_no_stars, re.I)
             if m:
                 invoice.invoiceID = m.group(1)
 
