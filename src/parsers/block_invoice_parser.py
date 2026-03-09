@@ -1518,7 +1518,9 @@ def parse_table(block: List[str], invoice: Invoice):
                     for cell in cells[1:]:  # skip the "TOTAL" label cell
                         if weight_pattern.search(cell):
                             continue
-                        cell_nums = re.findall(r'[\d\.\,]+', cell)
+                        # Also extract currency-prefixed numbers like USD6512, EUR1234
+                        _cell_clean = re.sub(r'^(?:USD|EUR|GBP|AUD|CAD|INR|SGD|JPY|CNY|KRW|THB)\s*\$?', '', cell.strip(), flags=re.I)
+                        cell_nums = re.findall(r'[\d\.\,]+', _cell_clean)
                         for n in cell_nums:
                             val = safe_parse_float(n)
                             if val is not None:
@@ -1577,8 +1579,9 @@ def parse_total(block: List[str], invoice: Invoice):
                     # Skip cells that are currency symbols only
                     if re.fullmatch(r'[€$£¥]+', cell.strip()):
                         continue
-                    # Extract numbers from this cell
-                    cell_nums = re.findall(r'[\d\.\,]+', cell)
+                    # Also extract currency-prefixed numbers like USD6512, EUR1234
+                    _cell_clean = re.sub(r'^(?:USD|EUR|GBP|AUD|CAD|INR|SGD|JPY|CNY|KRW|THB)\s*\$?', '', cell.strip(), flags=re.I)
+                    cell_nums = re.findall(r'[\d\.\,]+', _cell_clean)
                     for n in cell_nums:
                         val = safe_parse_float(n)
                         if val is not None:
@@ -2523,14 +2526,14 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
     
     # ===== INVOICE NAME (fallback) =====
     if not invoice.invoiceName:
-        # Pattern 1: Standalone "INVOICE" or "HÓA ĐƠN GTGT"
-        m = re.search(r'^(INVOICE|HÓA ĐƠN\s*(?:GTGT|GIÁ TRỊ GIA TĂNG)?)\s*$', raw_text, re.I | re.MULTILINE)
+        # Pattern 1: Standalone "INVOICE" or "PACKING LIST" or "HÓA ĐƠN GTGT"
+        m = re.search(r'^(INVOICE|PACKING\s+LIST|HÓA ĐƠN\s*(?:GTGT|GIÁ TRỊ GIA TĂNG)?)\s*$', raw_text, re.I | re.MULTILINE)
         if m:
             invoice.invoiceName = m.group(1).strip()
         
         # Pattern 2: "COMMERCIAL INVOICE", "PROFORMA INVOICE", "TAX INVOICE"
         if not invoice.invoiceName:
-            m = re.search(r'(COMMERCIAL\s+INVOICE|PROFORMA\s+INVOICE|TAX\s+INVOICE)', raw_text, re.I)
+            m = re.search(r'(COMMERCIAL\s+INVOICE|PROFORMA\s+INVOICE|TAX\s+INVOICE|PACKING\s+LIST)', raw_text, re.I)
             if m:
                 invoice.invoiceName = m.group(1).strip().upper()
         
@@ -2895,7 +2898,7 @@ def _is_en_invoice(raw_text: str) -> bool:
     if any(m in low for m in vn_markers):
         return False
     # EN markers — need at least one
-    en_markers = ["commercial invoice", "proforma invoice", "invoice",
+    en_markers = ["commercial invoice", "proforma invoice", "packing list", "invoice",
                   "bill to", "consignee", "shipper", "exporter",
                   "the seller:", "the buyer:", "ship to", "ship from"]
     return any(m in low for m in en_markers)
@@ -3463,7 +3466,7 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
     # Seller address fix: extract from ADDRESS label after SHIPPER/SELLER section
     if not invoice.sellerAddress or invoice.sellerAddress.startswith('#') or invoice.sellerAddress.startswith('|'):
         # Try finding address lines after SELLER/SHIPPER keywords
-        m = re.search(r'(?:SELLER|SHIPPER).*?ADDRESS\s*:.*?\n\|\s*([^|]+)', clean_text, re.I | re.S)
+        m = re.search(r'(?:SELLER|SHIPPER)[^\n]*\n(?:[^\n]*\n){0,10}[^\n]*ADDRESS\s*:[^\n]*\n\|\s*([^|]+)', clean_text, re.I)
         if not m:
              # Case 4 specific: table format with rows:
              # | THE SELLER: | COMMERCIAL INVOICE |
@@ -3472,10 +3475,11 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
              # | ADDRESS ROW | |
              # Capture group 1 = company name row, group 2 = address row after separator
              m = re.search(
-                 r'THE SELLER.*?\n\|[-\s|]+\|\s*\n'   # skip separator row
-                 r'\|\s*([^|\n]+?)\s*\|[^\n]*\n'       # group 1 = company name row
-                 r'\|\s*([^|\n]+)',                     # group 2 = address row
-                 clean_text, re.I | re.S
+                 r'THE SELLER[^\n]*\n'                    # THE SELLER line
+                 r'\|[-\s|]+\|\s*\n'                      # skip separator row
+                 r'\|\s*([^|\n]+?)\s*\|[^\n]*\n'          # group 1 = company name row
+                 r'\|\s*([^|\n]+)',                        # group 2 = address row
+                 clean_text, re.I
              )
         if m:
             # group(1) is company name, group(2) is address
@@ -4014,7 +4018,7 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
             if sub_val and sub_val > 0 and not invoice.preTaxPrice:
                 invoice.preTaxPrice = sub_val
             if pct_val and not invoice.taxPercent:
-                invoice.taxPercent = pct_val
+                invoice.taxPercent = str(int(pct_val)) + '%' if pct_val == int(pct_val) else str(pct_val) + '%'
             if tax_val and tax_val > 0 and not invoice.taxAmount:
                 invoice.taxAmount = tax_val
 
@@ -4024,7 +4028,8 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
         m = re.search(r'(?:Tax(?:es)?|VAT|Sales\s+Tax)(?:\s+Rate)?[\s|]*\(?\s*(\d+(?:\.\d+)?)\s*%', clean_text, re.I)
         if m:
             try:
-                invoice.taxPercent = float(m.group(1))
+                _pct_raw = m.group(1)
+                invoice.taxPercent = _pct_raw + '%'
             except ValueError:
                 pass
     
@@ -4055,7 +4060,9 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
 
     # ===== TAX AMOUNT FALLBACK: Calculate from preTaxPrice * taxPercent =====
     if not invoice.taxAmount and invoice.preTaxPrice and invoice.taxPercent:
-        invoice.taxAmount = round(invoice.preTaxPrice * invoice.taxPercent / 100, 2)
+        _tax_pct_val = re.search(r'([\d.]+)', invoice.taxPercent)
+        if _tax_pct_val:
+            invoice.taxAmount = round(invoice.preTaxPrice * float(_tax_pct_val.group(1)) / 100, 2)
 
     # ===== TOTAL FALLBACK: Subtotal + Tax when no explicit Total =====
     if not invoice.totalAmount and invoice.preTaxPrice:
@@ -4768,9 +4775,18 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
     if invoice.invoiceTotalInWord:
         _en_word_val = english_words_to_number(invoice.invoiceTotalInWord)
         if _en_word_val > 0:
-            if not invoice.totalAmount or (invoice.totalAmount < _en_word_val * 0.5) or (invoice.totalAmount > _en_word_val * 1.5):
-                # Current totalAmount is missing, too small, or too large compared to words value
+            if not invoice.totalAmount:
+                # totalAmount is missing — use word value
                 invoice.totalAmount = _en_word_val
+            elif (invoice.totalAmount < _en_word_val * 0.5) or (invoice.totalAmount > _en_word_val * 1.5):
+                # Current totalAmount differs significantly from words value.
+                # Validate: if current totalAmount matches item sum, trust the numeric total
+                _item_sum_for_word_check = sum(it.amount or 0 for it in (invoice.itemList or []))
+                _total_matches_items = (_item_sum_for_word_check > 0 and
+                                        abs(invoice.totalAmount - _item_sum_for_word_check) < (_item_sum_for_word_check * 0.05) + 10)
+                if not _total_matches_items:
+                    # Only override if current total does NOT match item amounts
+                    invoice.totalAmount = _en_word_val
 
     # Reverse fallback: if we have totalAmount but no invoiceTotalInWord, generate it
     if invoice.totalAmount and not invoice.invoiceTotalInWord:

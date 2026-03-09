@@ -63,7 +63,7 @@ def _detect_zoom_blocks(lines: List[str]):
     ]
     HEADER_TRIGGERS = [
         "commercial invoice", "proforma invoice", "pro forma invoice",
-        "tax invoice",
+        "tax invoice", "packing list",
         "vat invoice", "hóa đơn", "phiếu",
         "inv. no", "inv no", "invoice no",
         "invoice number", "invoice #",
@@ -78,6 +78,7 @@ def _detect_zoom_blocks(lines: List[str]):
     # Strategy: take the part BEFORE 2+ consecutive spaces; if that part has no colon → seller name
     INVOICE_TYPE_KEYWORDS = {'invoice', 'commercial invoice', 'proforma invoice',
                               'pro forma invoice', 'tax invoice', 'vat invoice',
+                              'packing list',
                               'hóa đơn', 'phiếu'}
     first_content_idx = None
     for i, line in enumerate(lines):
@@ -287,6 +288,13 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
                 else:
                     # Generic term — skip it, keep first_line=True for next line
                     continue
+            elif ":" in clean:
+                # Handle "Company: TLSH SAS" or "Company Name: XXX" label-value on first line
+                _company_m = re.match(r'(?:Company(?:\s+Name)?)\s*:\s*(.+)', clean, re.I)
+                if _company_m:
+                    _comp_val = _company_m.group(1).strip().strip('*').strip()
+                    if _comp_val and len(_comp_val) > 2:
+                        invoice.sellerName = _comp_val
             # Extract inline Ký hiệu / Serial on same line → invoiceSerial
             m_kh = re.search(r'[Kk][ýí]\s*hi[eệ]u[^:]*[:\s]+([A-Z0-9/\-]+)', clean, re.I)
             if m_kh and not invoice.invoiceSerial:
@@ -328,7 +336,7 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
                 continue  # Skip the company name repeat
             # Otherwise this IS the address
             and_not_phone = not any(k in _addr_clean.lower() for k in ["tel:", "fax:", "phone:"])
-            skip_kws = ["commercial invoice", "proforma", "tax invoice",
+            skip_kws = ["commercial invoice", "proforma", "tax invoice", "packing list",
                         "inv.", "s/c", "payment", "transportation",
                         "hóa đơn", "phiếu", "ngày"]
             if and_not_phone and not any(k in _addr_clean.lower() for k in skip_kws) and len(_addr_clean) > 5:
@@ -388,7 +396,7 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
         # Unlabeled continuation — if seller has name but no address yet (or address is being built)
         if invoice.sellerName and ":" not in clean and not _addr_done:
             skip_keywords = ["commercial invoice", "proforma", "tax invoice",
-                             "invoice",
+                             "invoice", "packing list",
                              "inv.", "s/c", "payment", "transportation",
                              "hóa đơn", "phiếu", "ngày",
                              "company name", "company address", "shipper", "exporter",
@@ -593,23 +601,33 @@ def _parse_en_buyer(lines: List[str], invoice: Invoice) -> None:
             continue
 
         # Pending buyer name from label-without-value (e.g. "THE BUYER:" alone on a line)
-        if getattr(invoice, "_pending_buyer_name", False) and not invoice.buyerName and ":" not in clean and len(clean) > 2:
-            skip_keywords = ["commercial invoice", "proforma", "inv.", "s/c", "payment", "transportation"]
-            # Handle pipe-table lines: extract cell content
-            _name_val = clean
-            if clean.startswith('|'):
-                cells = [c.strip() for c in clean.split('|') if c.strip()]
-                # Skip separator rows (|---|---|)
-                if not cells or all(set(c).issubset({'-', ' ', ':', '+'}) for c in cells):
+        if getattr(invoice, "_pending_buyer_name", False) and not invoice.buyerName:
+            # Handle "Company: XXX" label-value format
+            if ":" in clean:
+                _company_m = re.match(r'(?:Company(?:\s+Name)?)\s*:\s*(.+)', clean, re.I)
+                if _company_m:
+                    _comp_val = _company_m.group(1).strip().strip('*').strip()
+                    if _comp_val and len(_comp_val) > 2:
+                        invoice.buyerName = _comp_val
+                        invoice._pending_buyer_name = False
+                        continue
+            elif len(clean) > 2:
+                skip_keywords = ["commercial invoice", "proforma", "inv.", "s/c", "payment", "transportation"]
+                # Handle pipe-table lines: extract cell content
+                _name_val = clean
+                if clean.startswith('|'):
+                    cells = [c.strip() for c in clean.split('|') if c.strip()]
+                    # Skip separator rows (|---|---|)
+                    if not cells or all(set(c).issubset({'-', ' ', ':', '+'}) for c in cells):
+                        continue
+                    if cells and len(cells[0]) > 2:
+                        _name_val = cells[0]
+                    else:
+                        continue  # Empty pipe-table row, skip
+                if not any(k in _name_val.lower() for k in skip_keywords):
+                    invoice.buyerName = _name_val
+                    invoice._pending_buyer_name = False
                     continue
-                if cells and len(cells[0]) > 2:
-                    _name_val = cells[0]
-                else:
-                    continue  # Empty pipe-table row, skip
-            if not any(k in _name_val.lower() for k in skip_keywords):
-                invoice.buyerName = _name_val
-                invoice._pending_buyer_name = False
-                continue
 
         # Unlabeled continuation: buyer has name but address not yet set or still building
         if invoice.buyerName and ":" not in clean and not _buyer_addr_done:
@@ -711,10 +729,19 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
                     if not any(k in _pre_ctx for k in ['customer', 'delivery', 'note', 'parcel', 'iban', 'bic']):
                         invoice.invoiceID = m_no.group(1).strip()
                         _pending_invoice_id = False
-            # Pattern: "Invoice Number & Date" (or similar) with value on next line
-            if not invoice.invoiceID and re.match(r'(?:Invoice\s*Number\s*(?:&|and)\s*Date|Invoice\s*Number|Invoice\s*#)', clean, re.I):
+            # Pattern: "Invoice Number & Date" or "INV.NO." (label only, value on next line)
+            if not invoice.invoiceID and re.match(
+                r'(?:Invoice\s*Number\s*(?:&|and)\s*Date|Invoice\s*Number|Invoice\s*#|INV\.?\s*NO\.?)\s*$',
+                clean, re.I
+            ):
                 _pending_invoice_id = True
                 continue
+            # Pattern: "Number: IVN2025121" — standalone Number label (not Account/Phone/Serial)
+            if not invoice.invoiceID:
+                m_num = re.match(r'Number\s*:\s*([A-Za-z0-9][\w\-/]+)', clean, re.I)
+                if m_num:
+                    invoice.invoiceID = m_num.group(1).strip()
+                    _pending_invoice_id = False
 
         # Pending invoice ID: next non-empty line with digits is the ID
         if _pending_invoice_id and not invoice.invoiceID:
@@ -743,11 +770,13 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
         # Invoice Name — strip markdown ** before storing
         invoice_type_keywords = [
             "COMMERCIAL INVOICE", "PROFORMA INVOICE", "TAX INVOICE",
-            "VAT INVOICE", "HÓA ĐƠN", "PHIẾU",
+            "VAT INVOICE", "PACKING LIST",
+            "HÓA ĐƠN", "PHIẾU",
         ]
         up = clean.upper()
         if any(kw in up for kw in invoice_type_keywords) and not invoice.invoiceName:
             name_clean = re.sub(r'\s*[-–—]\s*No\.?\s*[A-Z0-9]+$', '', clean, flags=re.I).strip()
+            name_clean = name_clean.lstrip('#').strip()  # strip markdown heading chars
             if name_clean and 5 < len(name_clean) < 80:
                 invoice.invoiceName = name_clean
 
