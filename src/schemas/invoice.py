@@ -1,5 +1,5 @@
 from typing import List, Optional
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel, field_serializer, field_validator
 from datetime import date
 
 from src.schemas.invoice_item import InvoiceItem
@@ -57,6 +57,19 @@ class Invoice(BaseModel):
     preTaxPrice: Optional[float] = None
     discountTotal: Optional[float] = None
     taxPercent: Optional[str] = None
+
+    @field_validator('taxPercent', mode='before')
+    @classmethod
+    def coerce_tax_percent(cls, v):
+        """Convert float/int taxPercent to string (e.g. 10.0 -> '10%')"""
+        if v is None:
+            return v
+        if isinstance(v, (int, float)):
+            # 10.0 -> "10%", 10.5 -> "10.5%"
+            if isinstance(v, float) and v == int(v):
+                return str(int(v)) + '%'
+            return str(v) + '%'
+        return v
     taxAmount: Optional[float] = None
     totalAmount: Optional[float] = None
     invoiceTotalInWord: Optional[str] = None
