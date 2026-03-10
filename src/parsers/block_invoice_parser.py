@@ -699,7 +699,8 @@ def parse_header(block: List[str], invoice: Invoice):
         is_continuation = "GIÁ TRỊ" in up and invoice.invoiceName
         # Reject footer/disclaimer lines that happen to contain "hóa đơn"
         _footer_kws = ["kiểm tra", "đối chiếu", "tra cứu", "phát hành bởi",
-                       "cần kiểm tra", "giao nhận", "thay thế"]
+                       "cần kiểm tra", "giao nhận", "thay thế", "mã nhận",
+                       "trang trả cứu", "bản thể hiện"]
         _is_footer = any(fk in low for fk in _footer_kws)
         
         if (is_invoice_title or is_continuation) and "thay thế" not in low and not _is_footer:

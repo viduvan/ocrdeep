@@ -40,7 +40,7 @@ def _detect_zoom_blocks(lines: List[str]):
 
     SELLER_TRIGGERS = [
         "the seller:", "seller:", "shipper:", "shipper name", "beneficiary:",
-        "đơn vị bán hàng", "bên a", "bên bán",
+        "đơn vị bán hàng", "đơn vị bán", "bên a", "bên bán",
         # EN Commercial Invoice
         "exporter:", "exporter details", "exporter name", "sender:", "sender name",
         "ship from", "bill from", "billed from", "shipper/exporter",
@@ -53,7 +53,7 @@ def _detect_zoom_blocks(lines: List[str]):
         "the buyer:", "buyer:", "consignee:", "consignee", "bill to:", "bill to", "billed to",
         "khách hàng", "đơn vị mua", "bên b", "bên mua",
         "tên người mua hàng", "họ tên người mua",
-        "tên đơn vị mua", "người mua hàng:",
+        "tên đơn vị mua", "người mua hàng:", "người mua",
         # EN Commercial Invoice
         "sold to", "ship to", "importer:", "importer details",
         "consigned to", "consignee name", "invoice to", "recipient",
@@ -90,7 +90,8 @@ def _detect_zoom_blocks(lines: List[str]):
             _heading = stripped.lstrip('#').strip()
             _section_kws = ['shipper', 'exporter', 'consignee', 'importer', 'buyer',
                             'seller', 'invoice', 'bill', 'ship to', 'details',
-                            'commercial', 'proforma', 'summary']
+                            'commercial', 'proforma', 'summary',
+                            'hóa đơn', 'phiếu']
             if any(sk in _heading.lower() for sk in _section_kws):
                 continue  # Section label — skip
             # Skip pure numbers — they are invoice IDs (#123144), not company names
@@ -115,10 +116,17 @@ def _detect_zoom_blocks(lines: List[str]):
             # Skip header/metadata labels that aren't company names
             if any(hk in _fp_low for hk in HEADER_TRIGGERS):
                 continue
-            # Skip date values (e.g., "05 April 2023", "JAN-9-2026")
+            # Skip date values (e.g., "05 April 2023", "JAN-9-2026", "Ngày 26 tháng 05 năm 2025")
             if re.match(r'^\d{1,2}\s+[A-Za-z]+\s+\d{4}$', first_part_clean) or \
                re.match(r'^[A-Za-z]{3,}\s+\d{1,2},?\s+\d{4}$', first_part_clean) or \
-               re.match(r'^[A-Za-z]{3}[\-]\d{1,2}[\-]\d{4}$', first_part_clean):
+               re.match(r'^[A-Za-z]{3}[\-]\d{1,2}[\-]\d{4}$', first_part_clean) or \
+               re.match(r'^Ngày\s+(?:\([^)]*\)\s*)?\d+\s+tháng', first_part_clean, re.I):
+                continue
+            # Skip subtitle / disclaimer lines
+            if any(sk in _fp_low for sk in ['bản thể hiện', 'mã cqt']):
+                continue
+            # Skip markdown italic subtitles like *(VAT INVOICE)*
+            if first_part_clean.startswith('(') or (first_part_clean.startswith('*') and first_part_clean.endswith('*')):
                 continue
             first_content_idx = i
             break
@@ -164,6 +172,7 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
     first_line = True
     pending_seller_address = False  # When True: sellerName set, looking for address, skip name repeat
     _addr_done = False  # When True: seller address is complete, stop appending
+    _pending_field = None  # Track label-on-separate-line: 'tax', 'phone', 'email', 'address', 'bank'
     for line in lines:
         clean = line.strip()
         # Strip markdown
@@ -172,9 +181,34 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
         if not clean:
             continue
 
+        # Handle pending field from previous label-only line
+        if _pending_field and ':' not in clean:
+            _val = clean.strip()
+            if _pending_field == 'tax' and not invoice.sellerTaxCode:
+                m = re.search(r'[\dA-Z\-]{6,}', _val)
+                if m:
+                    invoice.sellerTaxCode = m.group(0).strip()
+            elif _pending_field == 'phone' and not invoice.sellerPhoneNumber:
+                m = re.search(r'[\d\s\-\+\(\)\.]{7,}', _val)
+                if m:
+                    invoice.sellerPhoneNumber = m.group(0).strip()
+            elif _pending_field == 'email' and not invoice.sellerEmail:
+                m = re.search(r'[\w.+-]+@[\w.-]+', _val)
+                if m:
+                    invoice.sellerEmail = m.group(0)
+            elif _pending_field == 'address' and not invoice.sellerAddress:
+                if len(_val) > 5:
+                    invoice.sellerAddress = _val
+            elif _pending_field == 'bank' and not invoice.sellerBankAccountNumber:
+                m = re.search(r'[\d\-\.]{6,}', _val)
+                if m:
+                    invoice.sellerBankAccountNumber = m.group(0).strip()
+            _pending_field = None
+            continue
+
         # EN labeled: "THE SELLER: <name>" or "Exporter: <name>" etc.
         if any(k in low for k in ["the seller:", "seller:", "shipper:", "beneficiary:",
-                                   "đơn vị bán hàng:",
+                                   "đơn vị bán hàng:", "đơn vị bán:",
                                    # EN Commercial Invoice
                                    "exporter:", "sender:", "sender name:",
                                    "ship from:", "bill from:", "billed from:",
@@ -369,14 +403,18 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
                 val = re.sub(r'\s{2,}S[oố][:\s]+\d+\s*$', '', val).strip()
                 if val and not invoice.sellerAddress:
                     invoice.sellerAddress = val
+                elif not val:
+                    _pending_field = 'address'  # value on next line
             continue
 
 
         # Phone / Tel
-        if any(k in low for k in ["tel:", "tel :", "tel/fax:", "phone:", "fax:"]):
+        if any(k in low for k in ["tel:", "tel :", "tel/fax:", "phone:", "fax:", "điện thoại:"]):
             m = re.search(r"[\d\s\-\+\(\)\.]{7,}", clean)
             if m and not invoice.sellerPhoneNumber:
                 invoice.sellerPhoneNumber = m.group(0).strip()
+            else:
+                _pending_field = 'phone'  # value on next line
             continue
 
         # Tax code
@@ -386,6 +424,8 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
             m = re.search(r"[\dA-Z\-]{6,}", clean)
             if m and not invoice.sellerTaxCode:
                 invoice.sellerTaxCode = m.group(0).strip()
+            else:
+                _pending_field = 'tax'  # value on next line
             continue
 
         # Email
@@ -393,6 +433,8 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
             em = re.search(r'[\w.+-]+@[\w.-]+', clean)
             if em and not invoice.sellerEmail:
                 invoice.sellerEmail = em.group(0)
+            else:
+                _pending_field = 'email'  # value on next line
             continue
 
         # Unlabeled continuation — if seller has name but no address yet (or address is being built)
@@ -475,12 +517,34 @@ def _parse_en_buyer(lines: List[str], invoice: Invoice) -> None:
     Hỗ trợ cả EN (THE BUYER:) và VN (Tên người mua hàng:, Tên đơn vị:).
     """
     _buyer_addr_done = False
+    _pending_field = None  # Track label-on-separate-line: 'tax', 'address', 'phone', 'name'
     for line in lines:
         clean = line.strip()
         clean = re.sub(r'\*\*([^*]+)\*\*', r'\1', clean).strip()
         low = clean.lower()
         if not clean:
             continue
+
+        # Handle pending field from previous label-only line
+        if _pending_field and ':' not in clean:
+            _val = clean.strip()
+            if _pending_field == 'tax' and not invoice.buyerTaxCode:
+                m = re.search(r'[\dA-Z\-]{6,}', _val)
+                if m:
+                    invoice.buyerTaxCode = re.sub(r'\s+', '', m.group(0).strip())
+            elif _pending_field == 'address' and not invoice.buyerAddress:
+                if len(_val) > 5:
+                    invoice.buyerAddress = _val
+            elif _pending_field == 'phone' and not invoice.buyerPhoneNumber:
+                m = re.search(r'[\d\+][\d\s\-\(\)\.]{6,}', _val)
+                if m:
+                    invoice.buyerPhoneNumber = m.group(0).strip()
+            elif _pending_field == 'name' and not invoice.buyerName:
+                if len(_val) > 3:
+                    invoice.buyerName = _val
+            _pending_field = None
+            continue
+
 
 
         # EN: THE BUYER: / CONSIGNEE: / SOLD TO: etc.  (authoritative — always overwrite)
@@ -514,6 +578,7 @@ def _parse_en_buyer(lines: List[str], invoice: Invoice) -> None:
             elif not val:
                 # Label with no value — next non-empty unlabeled line is the buyer name
                 invoice._pending_buyer_name = True
+                _pending_field = 'name'  # Also set pending field for consistent handling
             continue
 
         # Regex fallback: line ending with " to:" (OCR-garbled labels like "ISS.I60 To:")
@@ -546,10 +611,13 @@ def _parse_en_buyer(lines: List[str], invoice: Invoice) -> None:
         # VN: Tên người mua hàng: <name> OR Tên đơn vị: <name>
         # ZOOM TEXT is authoritative — always overwrite buyerName if we have explicit label
         if any(k in low for k in ["tên người mua hàng", "họ tên người mua",
-                                   "tên đơn vị", "khách hàng:"]):
-            val = clean.split(":", 1)[-1].strip()
+                                   "tên đơn vị", "khách hàng:", "người mua"]):
+            val = clean.split(":", 1)[-1].strip() if ":" in clean else ""
             if val:  # Always overwrite — explicit label is more reliable than continuation guesses
                 invoice.buyerName = val
+            else:
+                _pending_field = 'name'  # value on next line
+                invoice._pending_buyer_name = True
             continue
 
         # Address: "địa chỉ:" or "address:"
@@ -570,6 +638,8 @@ def _parse_en_buyer(lines: List[str], invoice: Invoice) -> None:
                 val = clean.split(":", 1)[-1].strip()
                 if val and not invoice.buyerAddress:
                     invoice.buyerAddress = val
+                elif not val:
+                    _pending_field = 'address'  # value on next line
             continue
 
         # Tax code: "Mã số thuế (Tax ID): 0107013883"
@@ -587,6 +657,8 @@ def _parse_en_buyer(lines: List[str], invoice: Invoice) -> None:
                 tax_val = re.sub(r'\s+', '', m_tax.group(1))
                 if len(tax_val) >= 10 and not invoice.buyerTaxCode:
                     invoice.buyerTaxCode = tax_val
+            else:
+                _pending_field = 'tax'  # value on next line
             continue
 
         # Phone: "Số điện thoại (Phone): 0984587968"
@@ -789,13 +861,25 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
         up = clean.upper()
         if any(kw in up for kw in invoice_type_keywords):
             # Reject footer/disclaimer lines
-            _footer_kws = ["kiểm tra", "đối chiếu", "tra cứu", "phát hành bởi", "cần kiểm tra"]
+            _footer_kws = ["kiểm tra", "đối chiếu", "tra cứu", "phát hành bởi", "cần kiểm tra",
+                           "mã nhận", "trang trả cứu", "bản thể hiện"]
             if not any(fk in clean.lower() for fk in _footer_kws):
                 name_clean = re.sub(r'\s*[-–—]\s*No\.?\s*[A-Z0-9]+$', '', clean, flags=re.I).strip()
                 name_clean = name_clean.lstrip('#').strip()  # strip markdown heading chars
-                if name_clean and 5 < len(name_clean) < 80:
+                # Skip markdown italic subtitles *(VAT INVOICE)*
+                _stripped_stars = name_clean.strip('*').strip()
+                if _stripped_stars.startswith('(') and _stripped_stars.endswith(')'):
+                    pass  # subtitle like *(VAT INVOICE)* — skip
+                elif name_clean and 5 < len(name_clean) < 80:
                     invoice.invoiceName = name_clean
-
+        # Continuation: "GIÁ TRỊ GIA TĂNG" or "KIÊM VẬN CHUYỂN" on separate line
+        elif invoice.invoiceName:
+            if "GIÁ TRỊ" in up and "GIÁ TRỊ" not in invoice.invoiceName.upper():
+                _cont_clean = clean.lstrip('#').strip()
+                invoice.invoiceName = invoice.invoiceName + " " + _cont_clean
+            elif "KIÊM" in up and "KIÊM" not in invoice.invoiceName.upper():
+                _cont_clean = clean.lstrip('#').strip()
+                invoice.invoiceName = invoice.invoiceName + " " + _cont_clean
         # Invoice Date — handle multiple formats
         # Normalize existing raw dates (e.g. "APR 4TH,2025" set by pre_parse) by checking if current value is non-numeric
         _date_needs_normalize = (
@@ -829,7 +913,7 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
 
             # Pattern: Ngày DD tháng MM năm YYYY (VN full)
             if not invoice.invoiceDate:
-                m = re.search(r"Ngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})\s+năm\s+(\d{4})", clean, re.I)
+                m = re.search(r"Ngày\s*(?:\([^)]*\)\s*)?\s*(\d{1,2})\s+tháng\s*(?:\([^)]*\)\s*)?\s*(\d{1,2})\s+năm\s*(?:\([^)]*\)\s*)?\s*(\d{4})", clean, re.I)
                 if m:
                     invoice.invoiceDate = f"{m.group(1).zfill(2)}/{m.group(2).zfill(2)}/{m.group(3)}"
 
