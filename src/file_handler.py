@@ -84,7 +84,7 @@ def extract_pdf_page_bytes(filepath, page_index, target_dpi=300):
     return img_bytes
 
 
-def get_header_crop_bytes(filepath: str, ratio: float = 0.35) -> bytes:
+def get_header_crop_bytes(filepath: str, ratio: float = 0.33) -> bytes:
     """
     Crops the top `ratio` part of the image/PDF (the header).
     Returns PNG bytes of the cropped region.

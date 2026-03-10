@@ -150,7 +150,7 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
         # qty MUST come BEFORE unit to avoid "NO.OF UNIT" matching "unit" first
         "qty": ["số lượng", "sl", "quantity", "qty", "数量", "no.of unit", "no. of unit",
                 "hrs/qty", "pcs"],
-        "unit": ["đvt", "đơn vị", "unit of measure"],
+        "unit": ["đvt", "đơn vị", "unit of measure", "unit"],
         "payment": ["thành tiền sau thuế", "cộng tiền thanh toán", "tổng cộng"],
         "currency_col": ["currency", "货号"],
         "discount": ["discounts", "discount", "chiết khấu", "giảm giá"],
