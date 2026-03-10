@@ -42,7 +42,7 @@ def _detect_zoom_blocks(lines: List[str]):
         "the seller:", "seller:", "shipper:", "shipper name", "beneficiary:",
         "đơn vị bán hàng", "đơn vị bán", "bên a", "bên bán",
         # EN Commercial Invoice
-        "exporter:", "exporter details", "exporter name", "sender:", "sender name",
+        "exporter:", "exporter details", "exporter name", "sender:", "sender name", "sender",
         "ship from", "bill from", "billed from", "shipper/exporter",
         "sender/exporter", "vendor/exporter", "from:",
         # Indian invoice
@@ -56,7 +56,7 @@ def _detect_zoom_blocks(lines: List[str]):
         "tên đơn vị mua", "người mua hàng:", "người mua",
         # EN Commercial Invoice
         "sold to", "ship to", "importer:", "importer details",
-        "consigned to", "consignee name", "invoice to", "recipient",
+        "consigned to", "consignee name", "invoice to", "recipient", "receiver",
         "notify party", "customer:", "issued to", "addressed to",
         # Indian invoice
         "billing address", "shipping address",
@@ -253,7 +253,7 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
         _section_labels = {"billed from", "bill from",
                            "shipper/exporter", "sender/exporter", "vendor/exporter",
                            "shipper name", "shipper", "exporter name",
-                           "ship from", "exporter",
+                           "ship from", "exporter", "sender",
                            "the seller", "from", "sold by"}
         _clean_for_label = clean.lstrip('#').strip()
         _label_low = _clean_for_label.lower()
@@ -594,11 +594,11 @@ def _parse_en_buyer(lines: List[str], invoice: Invoice) -> None:
         # Also handle non-markdown headers like "Billed to" (without #)
         clean_no_hash = clean.lstrip('#').strip()
         low_no_hash = clean_no_hash.lower()
-        _buyer_headers = ["recipient", "ship to", "sold to", "consignee",
+        _buyer_headers = ["recipient", "receiver", "ship to", "sold to", "consignee",
                           "bill to", "billed to", "importer", "buyer",
                           "billing address", "shipping address"]
         _non_md_buyer_hdrs = {"billed to", "bill to", "sold to", "ship to", "consignee", "recipient",
-                              "billing address", "shipping address"}
+                              "receiver", "billing address", "shipping address"}
         _is_buyer_header = (
             (clean.startswith('#') and any(k in low_no_hash for k in _buyer_headers)) or
             low_no_hash in _non_md_buyer_hdrs or
@@ -887,12 +887,20 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
             not re.match(r'^\d{1,2}/\d{1,2}/\d{4}$', str(invoice.invoiceDate))
         )
         if not invoice.invoiceDate or _date_needs_normalize:
-            # Pattern: APR 4TH, 2025 / APR. 04, 2025 / JAN-9-2026
+            # Pattern: APR 4TH, 2025 / APR. 04, 2025 / JAN-9-2026 (month-first)
             m = re.search(r"([A-Za-z]{3})\.?[\s\-]*(\d{1,2})(?:ST|ND|RD|TH)?[,\s\-]*(\d{4})", clean, re.I)
             if m:
                 month_abbr = m.group(1).lower()[:3]
                 if month_abbr in months:
                     invoice.invoiceDate = f"{m.group(2).zfill(2)}/{months[month_abbr]}/{m.group(3)}"
+
+            # Pattern: 08TH MAR 2016 / 4th April 2025 (day-first with ordinal)
+            if not invoice.invoiceDate:
+                m = re.search(r"(\d{1,2})(?:ST|ND|RD|TH)[\s\-]+([A-Za-z]{3,9})\.?[,\s\-]*(\d{4})", clean, re.I)
+                if m:
+                    month_abbr = m.group(2).lower()[:3]
+                    if month_abbr in months:
+                        invoice.invoiceDate = f"{m.group(1).zfill(2)}/{months[month_abbr]}/{m.group(3)}"
 
             # Pattern: date: 2025-04-04 or date: 2025/04/04
             if not invoice.invoiceDate:

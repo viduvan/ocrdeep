@@ -518,7 +518,10 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
             "serial no",
             "s/c no",                     # Added for Case 4
             "inv. date",                  # Added for Case 4
-        ]):
+        ]) or (
+            # Standalone "## INVOICE" heading (markdown format, no prefix like COMMERCIAL/TAX)
+            l.lstrip('#').strip() == 'invoice'
+        ):
             current = "header"
             seen_header = True
 
@@ -3916,6 +3919,8 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
             (r'(?:INV\.?\s*)?DATE\s*[:\s]+(\d{1,2})[\s\-/.](\w{3,9})[\s\-/.,]*(\d{2,4})', 'dmy_name'),
             # "Date: October 26, 2028" or "DEC 14th 2021" or "Date of Shipment:\n04/24/2024"
             (r'(?:INV\.?\s*)?DATE[^:]*[:\s]+(\w{3,9})\.?\s*(\d{1,2})(?:st|nd|rd|th)?,?\s*(\d{4})', 'mdy_name'),
+            # "Date: 08TH MAR 2016" / "1ST January 2025" (day-first with ordinal suffix)
+            (r'(?:INV\.?\s*)?DATE\s*[:\s]+(\d{1,2})(?:ST|ND|RD|TH)\s+(\w{3,9})\.?\s*,?\s*(\d{4})', 'dmy_name_ord'),
             # Pipe-table header: "| DATE OF EXPORT |...\n|---|...|\n| 12/1/2013 |..."
             (r'\|\s*DATE\s+OF\s+\w+\s*\|[^\n]*\n\|[-|\s]+\|\n\|\s*(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})\s*\|', 'mdy_num'),
             # "DATE OF EXPORTATION\n06/11/2019"
@@ -3938,7 +3943,7 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
             m = re.search(pat, clean_text, re.I)
             if m:
                 try:
-                    if fmt == 'dmy_name':
+                    if fmt == 'dmy_name' or fmt == 'dmy_name_ord':
                         day = m.group(1).zfill(2)
                         month_name = m.group(2).lower().rstrip('.,')
                         # Strip ordinal suffixes
