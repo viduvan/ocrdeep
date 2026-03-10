@@ -50,7 +50,7 @@ def _detect_zoom_blocks(lines: List[str]):
     ]
     # VN buyer labels — phổ biến trong zoom text hóa đơn VN
     BUYER_TRIGGERS = [
-        "the buyer:", "buyer:", "consignee:", "consignee", "bill to:", "billed to",
+        "the buyer:", "buyer:", "consignee:", "consignee", "bill to:", "bill to", "billed to",
         "khách hàng", "đơn vị mua", "bên b", "bên mua",
         "tên người mua hàng", "họ tên người mua",
         "tên đơn vị mua", "người mua hàng:",
@@ -479,6 +479,7 @@ def _parse_en_buyer(lines: List[str], invoice: Invoice) -> None:
         low = clean.lower()
         if not clean:
             continue
+
 
         # EN: THE BUYER: / CONSIGNEE: / SOLD TO: etc.  (authoritative — always overwrite)
         if any(k in low for k in ["the buyer:", "buyer:", "consignee:", "bill to:", "billed to:",
@@ -1010,7 +1011,7 @@ def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
             invoice.sellerPhoneNumber = _tmp.sellerPhoneNumber
 
     # ── Buyer ─────────────────────────────────────────────────────────────────
-    if not invoice.buyerName or not invoice.buyerAddress or getattr(invoice, '_pending_buyer_name', False):
+    if not invoice.buyerName or not invoice.buyerAddress or not invoice.buyerTaxCode or getattr(invoice, '_pending_buyer_name', False):
         _parse_en_buyer(buyer_lines, invoice)
 
         # VN fallback: only call if buyer_lines is EMPTY (EN handler already processed non-empty block)
