@@ -380,7 +380,9 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
             continue
 
         # Tax code
-        if any(k in low for k in ["vat:", "tax code:", "mã số thuế:"]):
+        if any(k in low for k in ["vat:", "tax code:", "tax id:", "mã số thuế:"]):
+            # Skip "Tax ID (Seller):" lines — they repeat the seller tax in payment section
+            # but the canonical source is the one directly under the company header
             m = re.search(r"[\dA-Z\-]{6,}", clean)
             if m and not invoice.sellerTaxCode:
                 invoice.sellerTaxCode = m.group(0).strip()
@@ -649,7 +651,17 @@ def _parse_en_buyer(lines: List[str], invoice: Invoice) -> None:
                     continue  # Empty or label cell, skip
             # Skip markdown headers (## Section Name)
             if _cont_val.lstrip('#').strip().lower() != _cont_val.lower():  # has leading #
-                _buyer_addr_done = True
+                # If this heading matches the existing buyerName, it's the buyer name
+                # heading — don't mark address as done, next lines are the address
+                _heading_text = _cont_val.lstrip('#').strip()
+                _is_buyer_name_heading = (
+                    invoice.buyerName and
+                    (_heading_text.lower() == invoice.buyerName.lower()
+                     or _heading_text.lower() in invoice.buyerName.lower()
+                     or invoice.buyerName.lower() in _heading_text.lower())
+                )
+                if not _is_buyer_name_heading:
+                    _buyer_addr_done = True
                 continue
             if any(k in _cont_val.lower() for k in skip_keywords):
                 _buyer_addr_done = True
@@ -775,11 +787,14 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
             "HÓA ĐƠN", "PHIẾU",
         ]
         up = clean.upper()
-        if any(kw in up for kw in invoice_type_keywords) and not invoice.invoiceName:
-            name_clean = re.sub(r'\s*[-–—]\s*No\.?\s*[A-Z0-9]+$', '', clean, flags=re.I).strip()
-            name_clean = name_clean.lstrip('#').strip()  # strip markdown heading chars
-            if name_clean and 5 < len(name_clean) < 80:
-                invoice.invoiceName = name_clean
+        if any(kw in up for kw in invoice_type_keywords):
+            # Reject footer/disclaimer lines
+            _footer_kws = ["kiểm tra", "đối chiếu", "tra cứu", "phát hành bởi", "cần kiểm tra"]
+            if not any(fk in clean.lower() for fk in _footer_kws):
+                name_clean = re.sub(r'\s*[-–—]\s*No\.?\s*[A-Z0-9]+$', '', clean, flags=re.I).strip()
+                name_clean = name_clean.lstrip('#').strip()  # strip markdown heading chars
+                if name_clean and 5 < len(name_clean) < 80:
+                    invoice.invoiceName = name_clean
 
         # Invoice Date — handle multiple formats
         # Normalize existing raw dates (e.g. "APR 4TH,2025" set by pre_parse) by checking if current value is non-numeric
@@ -968,19 +983,49 @@ def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
         if not invoice.sellerName and parse_seller is not None and seller_lines:
             parse_seller(seller_lines, invoice)
     elif invoice.sellerName and invoice.sellerAddress and seller_lines:
-        # Try zoom parse and keep the longer address version
         from src.schemas.invoice import Invoice as _Inv
+
+        # ── Seller/buyer confusion detection ─────────────────────────────
+        # Do a CLEAN parse (no pre-set sellerName) to discover what the zoom
+        # text actually says the seller is.
+        _tmp_clean = _Inv()
+        _parse_en_seller(seller_lines, _tmp_clean)
+
+        _zoom_sn = (_tmp_clean.sellerName or '').lower().strip()
+        _raw_sn = invoice.sellerName.lower().strip()
+        _zoom_name_differs = (_zoom_sn and _raw_sn and _zoom_sn != _raw_sn
+                              and _zoom_sn not in _raw_sn and _raw_sn not in _zoom_sn)
+
+        if _zoom_name_differs and buyer_lines:
+            # Check if the raw text seller name appears in the zoom buyer block
+            _buyer_has_raw_seller = any(
+                _raw_sn in bl.lower() or _raw_sn in bl.lower().lstrip('#').strip()
+                for bl in buyer_lines if bl.strip()
+            )
+            if _buyer_has_raw_seller:
+                # Raw text parser confused buyer for seller → override with zoom text
+                invoice.sellerName = _tmp_clean.sellerName
+                if _tmp_clean.sellerAddress:
+                    invoice.sellerAddress = _tmp_clean.sellerAddress
+                if _tmp_clean.sellerPhoneNumber:
+                    invoice.sellerPhoneNumber = _tmp_clean.sellerPhoneNumber
+                if _tmp_clean.sellerEmail:
+                    invoice.sellerEmail = _tmp_clean.sellerEmail
+                if _tmp_clean.sellerTaxCode:
+                    invoice.sellerTaxCode = _tmp_clean.sellerTaxCode
+
+        # ── Address enrichment (existing logic) ──────────────────────────
+        # Try zoom parse with pre-set name and keep the longer address version
         _tmp = _Inv()
         _tmp.sellerName = invoice.sellerName
         _parse_en_seller(seller_lines, _tmp)
-        # Only override address if zoom seller name matches existing seller name
-        # (prevents zoom text company header from overriding correct address)
         _names_match = (
             _tmp.sellerName and invoice.sellerName and
             (_tmp.sellerName.lower().strip() == invoice.sellerName.lower().strip()
              or _tmp.sellerName.lower() in invoice.sellerName.lower()
              or invoice.sellerName.lower() in _tmp.sellerName.lower())
         )
+
         # Also reject if zoom address starts with a different company name
         _addr_has_diff_company = False
         if _tmp.sellerAddress and invoice.sellerName:
@@ -992,18 +1037,18 @@ def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
                     and any(k in _addr_first_part.upper() for k in ['COMPANY', 'CORPORATION', 'CO.', 'LTD',
                                                                       'GROUP', 'JSC', 'INC', 'LLC'])):
                 _addr_has_diff_company = True
-        if (_tmp.sellerAddress and len(_tmp.sellerAddress) > len(invoice.sellerAddress)
+        if (_tmp.sellerAddress and len(_tmp.sellerAddress) > len(invoice.sellerAddress or '')
                 and _names_match and not _addr_has_diff_company):
             # Don't override if existing address looks like a real address (has digits)
             # and zoom address doesn't have digits (likely company tagline)
-            _existing_has_digits = bool(re.search(r'\d', invoice.sellerAddress))
+            _existing_has_digits = bool(re.search(r'\d', invoice.sellerAddress or ''))
             _zoom_has_digits = bool(re.search(r'\d', _tmp.sellerAddress))
             # Also check if existing address has street-type keywords (real address)
             _street_kw = ['boulevard', 'street', 'road', 'avenue', 'drive', 'lane',
                           'blvd', 'st.', 'rd.', 'ave.', 'dr.', 'block', 'zone',
                           'industrial', 'floor', 'building', 'no.', 'no ']
             _existing_is_street = _existing_has_digits and any(
-                k in invoice.sellerAddress.lower() for k in _street_kw
+                k in (invoice.sellerAddress or '').lower() for k in _street_kw
             )
             if not (_existing_has_digits and not _zoom_has_digits) and not _existing_is_street:
                 invoice.sellerAddress = _tmp.sellerAddress
@@ -1018,6 +1063,16 @@ def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
         # This prevents label-only lines like "Mã số thuế:" being stored as buyerName
         if not invoice.buyerName and parse_buyer is not None and not buyer_lines:
             parse_buyer(buyer_lines, invoice)
+
+    # ── Clean up buyerAddress: remove non-address noise ───────────────────
+    if invoice.buyerAddress:
+        _addr_parts = [p.strip() for p in invoice.buyerAddress.split(', ')]
+        _clean_parts = [
+            p for p in _addr_parts
+            if not re.match(r'^(?:Tax\s*(?:ID|Code)|MST|Mã số thuế|Attn|Người liên hệ)\s*:', p, re.I)
+        ]
+        if _clean_parts and len(_clean_parts) < len(_addr_parts):
+            invoice.buyerAddress = ', '.join(_clean_parts)
 
     # ── Header (invoiceID, invoiceName, invoiceDate, serial…) ─────────────────
     _parse_en_header(header_lines + lines, invoice)  # scan all lines for header fields

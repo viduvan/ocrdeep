@@ -697,8 +697,12 @@ def parse_header(block: List[str], invoice: Invoice):
                                  "COMMERCIAL INVOICE", "PROFORMA INVOICE", "TAX INVOICE"]
         is_invoice_title = any(kw in up for kw in invoice_type_keywords)
         is_continuation = "GIÁ TRỊ" in up and invoice.invoiceName
+        # Reject footer/disclaimer lines that happen to contain "hóa đơn"
+        _footer_kws = ["kiểm tra", "đối chiếu", "tra cứu", "phát hành bởi",
+                       "cần kiểm tra", "giao nhận", "thay thế"]
+        _is_footer = any(fk in low for fk in _footer_kws)
         
-        if (is_invoice_title or is_continuation) and "thay thế" not in low:
+        if (is_invoice_title or is_continuation) and "thay thế" not in low and not _is_footer:
             # Clean markdown header markers
             name = line.strip().lstrip("# ").strip()
             # For "COMMERCIAL INVOICE - No20250321003", strip the No... part for invoiceName

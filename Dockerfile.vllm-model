@@ -1,6 +1,4 @@
-# Base image from vLLM (pinned to avoid breaking changes)
-# v0.17.0 has tensor shape incompatibility with DeepSeek-OCR:
-#   ValueError: images_crop dim[2] expected 1024, got 640
+
 FROM vllm/vllm-openai:v0.16.0
 
 # Set environment variables for HuggingFace cache
