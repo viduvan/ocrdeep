@@ -833,14 +833,24 @@ def parse_header(block: List[str], invoice: Invoice):
                 # Handle markdown formatting: **00000438**
                 m = re.search(r"(?:Số|So|No\.?)[^:]*[:\s]+\*{0,2}(\d+)\*{0,2}", clean_line, re.I)
                 if m:
-                    invoice.invoiceID = m.group(1)
+                    # Reject if followed by address text (e.g. "No. 7 Bang Lang 1 Street")
+                    _after_id = clean_line[m.end():].strip().lower()
+                    _addr_kws = ['street', 'road', 'lane', 'ward', 'district', 'city', 'building',
+                                 'floor', 'block', 'avenue', 'blvd', 'bang', 'đường', 'phố', 'ngõ',
+                                 'phường', 'quận', 'huyện', 'tầng', 'tòa', 'thôn', 'xã']
+                    if not any(ak in _after_id for ak in _addr_kws):
+                        invoice.invoiceID = m.group(1)
             elif ("invoice no" in low or "invoice number" in low) and "stt" not in low:
-                m = re.search(r"(?<!PROFORMA )(?:Invoice\s*No\.?|Invoice\s*Number)[:\s]*\*{0,2}\s*([A-Za-z0-9][\w\-/]*)\*{0,2}", line, re.I)
-                if m and len(m.group(1)) >= 2:
-                    invoice.invoiceID = m.group(1)
-                elif m and len(m.group(1)) == 1:
-                    # Single digit likely instruction number — next line has actual ID
-                    invoice._pending_invoice_id = True
+                # Reject instructional text like "Please include invoice number on your payment"
+                _instruction_kws = ['include', 'reference', 'quote', 'provide', 'mention', 'state', 'note']
+                _is_instruction = any(ik in low for ik in _instruction_kws)
+                if not _is_instruction:
+                    m = re.search(r"(?<!PROFORMA )(?:Invoice\s*No\.?|Invoice\s*Number)[:\s]*\*{0,2}\s*([A-Za-z0-9][\w\-/]*)\*{0,2}", line, re.I)
+                    if m and len(m.group(1)) >= 2:
+                        invoice.invoiceID = m.group(1)
+                    elif m and len(m.group(1)) == 1:
+                        # Single digit likely instruction number — next line has actual ID
+                        invoice._pending_invoice_id = True
         
         # Handle pending invoice ID from previous line (value-on-next-line pattern)
         if getattr(invoice, '_pending_invoice_id', False) and not invoice.invoiceID:
@@ -2253,7 +2263,13 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
             if m:
                 # Extra check: reject if preceded by 'Địa chỉ' or 'Address' on same line
                 _before_match = raw_text[max(0, m.start()-60):m.start()]
-                if not re.search(r'(?:địa chỉ|address|add\.)', _before_match, re.I):
+                # Extra check: reject if followed by address text (e.g. "No. 7 Bang Lang 1 Street")
+                _after_match = raw_text[m.end():m.end()+80].strip().lower()
+                _addr_kws_after = ['street', 'road', 'lane', 'ward', 'district', 'city', 'building',
+                                   'floor', 'avenue', 'blvd', 'bang', 'đường', 'phố', 'ngõ',
+                                   'phường', 'quận', 'huyện', 'tầng', 'tòa', 'thôn', 'xã']
+                _is_address_after = any(ak in _after_match for ak in _addr_kws_after)
+                if not re.search(r'(?:địa chỉ|address|add\.)', _before_match, re.I) and not _is_address_after:
                     val = m.group(1).lstrip('0') or m.group(1)
                     print(f"DEBUG: Found InvoiceID via Regex 1 (Simple): '{val}'")
                     invoice.invoiceID = val

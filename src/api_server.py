@@ -30,8 +30,11 @@ def _try_right_crop_zoom(invoice: Invoice, filepath: str, page_idx: int,
     when it overlaps with large title text on the left.
     Returns the right-crop OCR text (or empty string).
     """
+    # Skip if invoiceID is already set (any value)
     if invoice.invoiceID:
+        print(f"Right-crop skipped: invoiceID already set to '{invoice.invoiceID}'")
         return ""
+    print(f"Right-crop triggered: invoiceID is null")
     
     right_bytes = file_handler.get_header_right_crop_bytes(filepath, page_idx)
     if not right_bytes:
