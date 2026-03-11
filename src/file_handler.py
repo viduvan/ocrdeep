@@ -164,3 +164,12 @@ def get_header_crop_bytes_page(filepath: str, page_index: int, ratio: float = 0.
     except Exception as e:
         print(f"Error extracting header crop for page {page_index}: {e}")
         return None
+
+
+def get_bol_crop_bytes_page(filepath: str, page_index: int, ratio: float = 0.45) -> bytes:
+    """
+    Crops the top `ratio` part of a SPECIFIC PAGE for Bill of Lading documents.
+    Default ratio is 0.45 (45%) since B/L headers are larger than invoice headers.
+    Returns PNG bytes of the cropped region.
+    """
+    return get_header_crop_bytes_page(filepath, page_index, ratio=ratio)

@@ -1042,6 +1042,134 @@ async def ocr_cccd_realtime(request: CCCDRealtimeRequest):
 
 
 
+
+# ============================================
+# BILL OF LADING OCR ENDPOINT
+# ============================================
+
+@app.post(
+    "/ocr-bol",
+    summary="OCR Bill of Lading (B/L) document",
+)
+async def detect_bill_of_lading_ocr(
+    file: UploadFile = File(...),
+    model_name: str = Form(config.VLLM_MODEL),
+    ocr_mode: str = Form(config.DEFAULT_OCR_MODE),
+    pages: str = Form(None),
+    per_file_timeout: int = Form(config.OCR_TIMEOUT_SECONDS),
+):
+    """
+    OCR a single Bill of Lading (B/L) document (PNG, JPG, JPEG, PDF).
+    Returns parsed B/L data with shipper, consignee, cargo details.
+    Uses 45% header crop for zoom-in OCR pass.
+    """
+    from src.schemas.bill_of_lading import BillOfLading
+    from src.parsers.block_bol_parser import parse_bol_block_based
+    from src.parsers.block_bol_zoomtext_parser import parse_zoom_bol
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file uploaded")
+
+    if not file.filename.lower().endswith((".png", ".jpg", ".jpeg", ".pdf")):
+        raise HTTPException(status_code=400, detail="Unsupported file type. Use PNG, JPG, JPEG, or PDF.")
+
+    session_id = str(uuid.uuid4())
+    temp_dir = Path("temp_ocr") / session_id
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save temp file
+    temp_file = temp_dir / file.filename
+    with open(temp_file, "wb") as f:
+        f.write(await file.read())
+
+    file_start_time = time.time()
+
+    try:
+        # OCR the full document
+        ocr_result = run_vision_ocr(
+            str(temp_file),
+            model_name=model_name,
+            ocr_mode=ocr_mode,
+            pages=pages,
+            timeout_seconds=per_file_timeout,
+        )
+
+        raw_text = ocr_result["raw_text"]
+
+        # Parse B/L from raw text
+        bol = parse_bol_block_based(raw_text)
+
+        # ---- ZOOM-IN PASS (45% crop) ----
+        # Always run zoom-in for B/L since header fields are critical
+        missing_fields = []
+        if not bol.blNumber:
+            missing_fields.append("blNumber")
+        if not bol.shipperName:
+            missing_fields.append("shipperName")
+        if not bol.consigneeName:
+            missing_fields.append("consigneeName")
+        if not bol.carrier:
+            missing_fields.append("carrier")
+
+        if missing_fields:
+            print(f"B/L Missing fields {missing_fields} - Triggering 45% Zoom-in Pass...")
+            selected_page_indices = ocr_result.get("page_indices", [0])
+            zoom_page_idx = selected_page_indices[0] if selected_page_indices else 0
+
+            # Use 45% crop for B/L documents
+            bol_crop_bytes = file_handler.get_bol_crop_bytes_page(str(temp_file), zoom_page_idx)
+            if bol_crop_bytes:
+                zoom_prompt = config.PROMPTS.get("header_only", "Free OCR.")
+                zoom_chunks = []
+                try:
+                    for chunk in stream_ocr_response(
+                        model_name=model_name,
+                        prompt=zoom_prompt,
+                        image_bytes=bol_crop_bytes,
+                        options=config.INFERENCE_PARAMS,
+                        timeout_seconds=config.ZOOM_OCR_TIMEOUT_SECONDS,
+                    ):
+                        if chunk:
+                            zoom_chunks.append(chunk)
+
+                    zoom_text = "".join(zoom_chunks).strip()
+                    print(f"B/L Zoom-in Text: {zoom_text[:100]}...")
+
+                    # Parse zoom text
+                    zoom_lines = zoom_text.splitlines()
+                    parse_zoom_bol(zoom_lines, bol)
+
+                    # Append zoom text for debugging
+                    if zoom_text:
+                        raw_text += f"\n\n--- ZOOM TEXT ---\n{zoom_text}"
+
+                except Exception as e:
+                    print(f"B/L Zoom-in OCR failed: {e}")
+                    raw_text += f"\n\n--- ZOOM ERROR ---\n{e}"
+
+        # Build result
+        result_data = {
+            "filename": file.filename,
+            "duration_sec": ocr_result["duration_sec"],
+            "ocr_mode": ocr_mode,
+            "raw_text": raw_text,
+            "data": bol,
+        }
+        if ocr_result.get("timed_out"):
+            result_data["warning"] = f"OCR timeout - partial results (limit: {per_file_timeout}s)"
+        return result_data
+
+    except Exception as e:
+        elapsed = time.time() - file_start_time
+        return {
+            "filename": file.filename,
+            "error": str(e),
+            "duration_sec": round(elapsed, 2),
+            "data": None
+        }
+
+
+
 # FILE ACCESS (DEBUG)
 @app.get("/files/{session_id}/{filename}")
 async def get_temp_file(session_id: str, filename: str):
