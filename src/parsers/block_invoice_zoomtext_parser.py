@@ -1237,3 +1237,85 @@ def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
                 if f and not invoice.invoiceFormNo:
                     invoice.invoiceFormNo = f
                 break
+
+
+def parse_zoom_right_header(lines: List[str], invoice: Invoice):
+    """
+    Lightweight parser for right-side header crop.
+    Only extracts invoiceID and invoiceDate when they overlap with title text.
+    """
+    months = {
+        'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
+        'may': '05', 'jun': '06', 'jul': '07', 'aug': '08',
+        'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12',
+        'january': '01', 'february': '02', 'march': '03', 'april': '04',
+        'june': '06', 'july': '07', 'august': '08', 'september': '09',
+        'october': '10', 'november': '11', 'december': '12',
+    }
+
+    for line in lines:
+        clean = line.strip()
+        if not clean:
+            continue
+        low = clean.lower()
+
+        # --- Invoice ID ---
+        if not invoice.invoiceID:
+            # Pattern: "No.: INV-20250102" / "Invoice No: 12345" / "No: ABC-123"
+            m = re.search(
+                r'(?:invoice\s*)?(?:no|number|số)\s*\.?\s*[:\s]\s*([A-Za-z0-9][\w\-/]+)',
+                clean, re.I
+            )
+            if m:
+                val = m.group(1).strip()
+                # Reject date-like values
+                if not re.match(r'^\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}$', val):
+                    invoice.invoiceID = val
+                    continue
+
+            # Pattern: "# 12345" or "#INV-2025"
+            m = re.match(r'^#\s*([A-Za-z0-9][\w\-/]+)$', clean)
+            if m:
+                val = m.group(1).strip()
+                if re.search(r'\d', val):
+                    invoice.invoiceID = val
+                    continue
+
+            # Standalone alphanumeric ID (e.g. "INV-20250102" on its own line)
+            if re.match(r'^[A-Za-z0-9][\w\-/]{4,20}$', clean) and re.search(r'\d', clean):
+                # Reject known non-ID patterns
+                if clean.lower() not in ('invoice', 'original', 'copy', 'draft', 'page'):
+                    if not re.match(r'^\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}$', clean):
+                        invoice.invoiceID = clean
+                        continue
+
+        # --- Invoice Date ---
+        if not invoice.invoiceDate:
+            # Pattern: "Date: 2025-01-15" or "Date: 15/01/2025"
+            m = re.search(r'[Dd]ate\s*[:\s]\s*(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})', clean)
+            if m:
+                invoice.invoiceDate = f"{m.group(3).zfill(2)}/{m.group(2).zfill(2)}/{m.group(1)}"
+                continue
+            m = re.search(r'[Dd]ate\s*[:\s]\s*(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})', clean)
+            if m:
+                invoice.invoiceDate = f"{m.group(1).zfill(2)}/{m.group(2).zfill(2)}/{m.group(3)}"
+                continue
+            # Pattern: "Date: Jan 15, 2025" / "Date: 15 Jan 2025"
+            m = re.search(
+                r'[Dd]ate\s*[:\s]\s*(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?\s*,?\s*(\d{4})',
+                clean
+            )
+            if m:
+                month_abbr = m.group(2).lower()[:3]
+                if month_abbr in months:
+                    invoice.invoiceDate = f"{m.group(1).zfill(2)}/{months[month_abbr]}/{m.group(3)}"
+                    continue
+            m = re.search(
+                r'[Dd]ate\s*[:\s]\s*([A-Za-z]{3,9})\.?\s*(\d{1,2})(?:st|nd|rd|th)?\s*,?\s*(\d{4})',
+                clean
+            )
+            if m:
+                month_abbr = m.group(1).lower()[:3]
+                if month_abbr in months:
+                    invoice.invoiceDate = f"{m.group(2).zfill(2)}/{months[month_abbr]}/{m.group(3)}"
+                    continue

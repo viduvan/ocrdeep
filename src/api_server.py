@@ -20,7 +20,45 @@ from src.schemas.invoice_item import InvoiceItem
 from src.parsers.invoice_parser import normalize_invoice_output
 from src.semantic.semantic_refine import semantic_refine
 from src.parsers.block_invoice_parser import parse_invoice_block_based, parse_header
+from src.parsers.block_invoice_zoomtext_parser import parse_zoom_header, parse_zoom_right_header
 
+
+def _try_right_crop_zoom(invoice: Invoice, filepath: str, page_idx: int,
+                          model_name: str) -> str:
+    """
+    Second zoom pass: crop right side of header to extract invoiceID
+    when it overlaps with large title text on the left.
+    Returns the right-crop OCR text (or empty string).
+    """
+    if invoice.invoiceID:
+        return ""
+    
+    right_bytes = file_handler.get_header_right_crop_bytes(filepath, page_idx)
+    if not right_bytes:
+        return ""
+    
+    try:
+        zoom_prompt = config.PROMPTS.get("header_only", "Extract header info.")
+        right_chunks = []
+        for chunk in stream_ocr_response(
+            model_name=model_name,
+            prompt=zoom_prompt,
+            image_bytes=right_bytes,
+            options=config.INFERENCE_PARAMS,
+            timeout_seconds=config.ZOOM_OCR_TIMEOUT_SECONDS,
+        ):
+            if chunk:
+                right_chunks.append(chunk)
+        
+        right_text = "".join(right_chunks).strip()
+        if right_text:
+            print(f"Right-crop Zoom Text: {right_text[:100]}...")
+            right_lines = right_text.splitlines()
+            parse_zoom_right_header(right_lines, invoice)
+        return right_text
+    except Exception as e:
+        print(f"Right-crop Zoom OCR failed: {e}")
+        return ""
 
 
 
@@ -270,6 +308,9 @@ async def detect_single_invoice_ocr(
                         except Exception as e:
                             print(f"Page {actual_page_idx + 1} Zoom-in OCR failed: {e}")
                 
+                    # Right-crop zoom: extract invoiceID from overlapping header text
+                    right_text = _try_right_crop_zoom(invoice, str(temp_file), actual_page_idx, model_name)
+                
                 # Convert to dict and refine
                 from pydantic import BaseModel
                 if isinstance(invoice, BaseModel):
@@ -389,6 +430,11 @@ async def detect_single_invoice_ocr(
                 except Exception as e:
                     print(f"Zoom-in OCR failed: {e}")
                     raw_text += f"\n\n--- ZOOM ERROR ---\n{e}"
+
+            # Right-crop zoom: extract invoiceID from overlapping header text
+            right_text = _try_right_crop_zoom(invoice, str(temp_file), zoom_page_idx, model_name)
+            if right_text:
+                raw_text += f"\n\n--- ZOOM RIGHT ---\n{right_text}"
 
         # Semantic refine
         if semantic:
@@ -572,6 +618,9 @@ async def detect_invoice_ocr(
                             except Exception as e:
                                 print(f"Page {actual_page_idx + 1} Zoom-in OCR failed: {e}")
                     
+                        # Right-crop zoom: extract invoiceID from overlapping header text
+                        right_text = _try_right_crop_zoom(invoice, str(temp_file), actual_page_idx, model_name)
+                    
                     # Convert to dict for semantic refine
                     from pydantic import BaseModel
                     if isinstance(invoice, BaseModel):
@@ -702,6 +751,11 @@ async def detect_invoice_ocr(
                     except Exception as e:
                         print(f"Zoom-in OCR failed: {e}")
                         raw_text += f"\n\n--- ZOOM ERROR ---\n{e}"
+
+                # Right-crop zoom: extract invoiceID from overlapping header text
+                right_text = _try_right_crop_zoom(invoice, str(temp_file), zoom_page_idx, model_name)
+                if right_text:
+                    raw_text += f"\n\n--- ZOOM RIGHT ---\n{right_text}"
 
             #SEMANTIC REFINE (CHỈ FIELD NULL)
             if semantic:

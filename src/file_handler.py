@@ -128,6 +128,49 @@ def get_header_crop_bytes(filepath: str, ratio: float = 0.33) -> bytes:
         return None
 
 
+def get_header_right_crop_bytes(filepath: str, page_index: int = 0,
+                                 ratio: float = 0.27, x_ratio: float = 0.5) -> bytes:
+    """
+    Crops the top-RIGHT portion of the page (right x_ratio%, top ratio%).
+    Useful when Invoice ID overlaps with large title text on the left side.
+    Returns PNG bytes of the cropped region.
+    """
+    try:
+        if filepath.lower().endswith(".pdf"):
+            doc = fitz.open(filepath)
+            if page_index >= len(doc):
+                doc.close()
+                return None
+            page = doc.load_page(page_index)
+            rect = page.rect
+
+            clip_height = rect.height * ratio
+            x_start = rect.x0 + (rect.x1 - rect.x0) * x_ratio
+            clip = fitz.Rect(x_start, rect.y0, rect.x1, rect.y0 + clip_height)
+
+            target_dpi = 72
+            zoom = target_dpi / 72.0
+            matrix = fitz.Matrix(zoom, zoom)
+
+            pix = page.get_pixmap(matrix=matrix, clip=clip, alpha=False)
+            doc.close()
+            return pix.tobytes("png")
+        else:
+            # Image handling
+            with Image.open(filepath) as img:
+                w, h = img.size
+                crop_h = int(h * ratio)
+                x_start = int(w * x_ratio)
+                cropped_img = img.crop((x_start, 0, w, crop_h))
+
+                buf = io.BytesIO()
+                cropped_img.save(buf, format="PNG")
+                return buf.getvalue()
+    except Exception as e:
+        print(f"Error extracting right-header crop: {e}")
+        return None
+
+
 def get_header_crop_bytes_page(filepath: str, page_index: int, ratio: float = 0.35) -> bytes:
     """
     Crops the top `ratio` part of a SPECIFIC PAGE of a PDF.
@@ -171,5 +214,35 @@ def get_bol_crop_bytes_page(filepath: str, page_index: int, ratio: float = 0.45)
     Crops the top `ratio` part of a SPECIFIC PAGE for Bill of Lading documents.
     Default ratio is 0.45 (45%) since B/L headers are larger than invoice headers.
     Returns PNG bytes of the cropped region.
+    For B/L zoom-in OCR pass.
     """
-    return get_header_crop_bytes_page(filepath, page_index, ratio=ratio)
+    try:
+        if not filepath.lower().endswith(".pdf"):
+            # For images, delegate to the regular header crop function
+            return get_header_crop_bytes(filepath, ratio)
+        
+        doc = fitz.open(filepath)
+        if page_index >= len(doc):
+            doc.close()
+            print(f"B/L crop: Page index {page_index} out of range for PDF with {len(doc)} pages")
+            return None
+        
+        page = doc.load_page(page_index)
+        rect = page.rect
+        
+        # Define crop box (top 45% portion) relative to page origin
+        clip_height = rect.height * ratio
+        clip = fitz.Rect(rect.x0, rect.y0, rect.x1, rect.y0 + clip_height)
+        
+        # Use native PDF resolution
+        target_dpi = 72
+        zoom = target_dpi / 72.0
+        
+        matrix = fitz.Matrix(zoom, zoom)
+        
+        pix = page.get_pixmap(matrix=matrix, clip=clip, alpha=False)
+        doc.close()
+        return pix.tobytes("png")
+    except Exception as e:
+        print(f"Error extracting B/L crop for page {page_index}: {e}")
+        return None
