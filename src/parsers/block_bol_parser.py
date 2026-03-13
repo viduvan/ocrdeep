@@ -7,7 +7,7 @@ and freight terms from plain OCR text.
 
 import re
 from typing import List, Dict
-from src.schemas.bill_of_lading import BillOfLading
+from src.schemas.bill_of_lading import BillOfLading, BolItem
 
 
 def clean_lines(raw_text: str) -> List[str]:
@@ -68,7 +68,7 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
             "shipper (name",
             "shipper:",
             "shipper/exporter",
-        ]) or low.startswith("shipper "):
+        ]) or low == "shipper" or low.startswith("shipper "):
             current = "shipper"
 
         # ===== CONSIGNEE =====
@@ -77,7 +77,8 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
             "consignee (name",
             "consignee:",
             "consignee/importer",
-        ]) or low.startswith("consignee "):
+            "consignee (if to order",
+        ]) or low == "consignee" or low.startswith("consignee "):
             current = "consignee"
 
         # ===== NOTIFY PARTY =====
@@ -107,9 +108,15 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
             "marks and number",
             "container no",
             "description of goods",
+            "description of packages",
             "quantity and",
             "gross weight",
             "measurement",
+            "commodity",
+            "shipped on board",
+            "trade term",
+            "l/c number",
+            "l/c no",
         ]):
             current = "cargo"
 
@@ -126,6 +133,9 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
             "laden on board",
             "s/o no",
             "total number of containers",
+            "say one",
+            "say two",
+            "say three",
         ]):
             current = "freight"
 
@@ -160,7 +170,7 @@ def parse_shipper(block: List[str], bol: BillOfLading):
         clean = line.strip()
 
         # Skip the section label itself
-        if any(k in low for k in ["shipper (complete", "shipper (name", "shipper:"]):
+        if any(k in low for k in ["shipper (complete", "shipper (name", "shipper:"]) or low == "shipper":
             # Check if there's a value after the label
             if ":" in clean:
                 val = clean.split(":", 1)[-1].strip()
@@ -168,15 +178,12 @@ def parse_shipper(block: List[str], bol: BillOfLading):
                     bol.shipperName = val
             continue
 
-        # Tel/Fax
-        tel_m = re.search(r'TEL[:\s]*([+\d\-\s]+)', clean, re.I)
-        fax_m = re.search(r'FAX[:\s]*([+\d\-\s]+)', clean, re.I)
+        # Tel/Fax (both go to shipperTel)
+        tel_m = re.search(r'TEL[.:\s]*([+\d\-\s]+)', clean, re.I)
+        fax_m = re.search(r'FAX[.:\s]*([+\d\-\s]+)', clean, re.I)
         if tel_m:
             if not bol.shipperTel:
                 bol.shipperTel = tel_m.group(1).strip()
-        if fax_m:
-            if not bol.shipperFax:
-                bol.shipperFax = fax_m.group(1).strip()
         if tel_m or fax_m:
             continue
 
@@ -202,7 +209,7 @@ def parse_consignee(block: List[str], bol: BillOfLading):
         clean = line.strip()
 
         # Skip section label
-        if any(k in low for k in ["consignee (complete", "consignee (name", "consignee:"]):
+        if any(k in low for k in ["consignee (complete", "consignee (name", "consignee:", "consignee (if to order"]) or low == "consignee":
             if ":" in clean:
                 val = clean.split(":", 1)[-1].strip()
                 if val and not bol.consigneeName:
@@ -288,6 +295,7 @@ def parse_shipping(block: List[str], bol: BillOfLading):
         "place of receipt": "placeOfReceipt",
         "place of delivery": "placeOfDelivery",
         "final destination": "finalDestination",
+        "type of movement": "typeOfMovement",
     }
 
     i = 0
@@ -319,6 +327,8 @@ def parse_shipping(block: List[str], bol: BillOfLading):
                             bol.placeOfReceipt = val
                         elif field_name == "placeOfDelivery" and not bol.placeOfDelivery:
                             bol.placeOfDelivery = val
+                        elif field_name == "typeOfMovement" and not bol.typeOfMovement:
+                            bol.typeOfMovement = val.upper()
             i += 2  # Skip both header and value rows
             continue
 
@@ -358,14 +368,14 @@ def parse_shipping(block: List[str], bol: BillOfLading):
 
 
 def parse_cargo(block: List[str], bol: BillOfLading):
-    """Extract cargo details: description, weight, measurement, container, HS code."""
+    """Extract cargo details: description, weight, measurement, container, HS code, trade terms."""
     description_parts = []
+    hs_code = None
     for line in block:
         clean = line.strip()
         low = clean.lower()
 
         # Container No / Seal No
-        # Pattern: BEAU6340730 / 40'HQ / U612888
         container_m = re.search(r'([A-Z]{4}\d{7})', clean)
         if container_m and not bol.containerNo:
             bol.containerNo = container_m.group(1)
@@ -380,71 +390,125 @@ def parse_cargo(block: List[str], bol: BillOfLading):
         if weight_m and not bol.grossWeight:
             bol.grossWeight = weight_m.group(0).strip()
 
+        # Net Weight
+        nw_m = re.search(r'NET\s*WEIGHT[:\s]*(\d[\d,\.]+\s*(?:KGS|KG)?)', clean, re.I)
+        if nw_m and not bol.netWeight:
+            bol.netWeight = nw_m.group(1).strip()
+
         # Measurement
         meas_m = re.search(r'(\d[\d,\.]+)\s*(?:CBM|M[³3])', clean, re.I)
         if meas_m and not bol.measurement:
             bol.measurement = meas_m.group(0).strip()
 
-        # HS Code
-        hs_m = re.search(r'HS\s*CODE[:\s]*(\d{4,})', clean, re.I)
-        if hs_m and not bol.hsCode:
-            bol.hsCode = hs_m.group(1).strip()
+        # HS Code (capture for BolItem)
+        hs_m = re.search(r'HS[:\s]*(?:CODE)?[:\s]*(\d[\d\.]{3,})', clean, re.I)
+        if hs_m and not hs_code:
+            hs_code = hs_m.group(1).strip()
 
-        # Packages count
-        pkg_m = re.search(r'(\d+)\s*PACKAGE', clean, re.I)
+        # Packages count (10 PALLETS, 4 PACKAGES, 1 CASE, etc.)
+        pkg_m = re.search(r'(\d+)\s*(?:PACKAGE|PALLET|CASE|CARTON|SETS|PCS)', clean, re.I)
         if pkg_m and not bol.packages:
             bol.packages = pkg_m.group(0).strip()
 
-        # Description of goods: look for SHIPPER'S LOAD or specific goods description
-        # Also look for product names like "4 AXIS CNC MILLING MACHINE"
-        if "shipper's load" in low or "s.t.c." in low:
-            continue  # These are standard phrases, skip
+        # Type of Movement: CY-CY, CFS-CFS
+        mov_m = re.search(r'\b(C[YF]S?-C[YF]S?)\b', clean, re.I)
+        if mov_m and not bol.typeOfMovement:
+            bol.typeOfMovement = mov_m.group(1).upper()
+
+        # Trade Term: FOB, CIF, CFR, etc.
+        trade_m = re.search(r'\bTRADE\s*TERM[:\s]*(FOB|CIF|CFR|CIP|FCA|EXW|DAP|DDP)\b', clean, re.I)
+        if trade_m and not bol.tradeTerm:
+            bol.tradeTerm = trade_m.group(1).upper()
+        # Also detect standalone FOB/CIF at start of line
+        if not bol.tradeTerm:
+            trade_m2 = re.search(r'^(FOB|CIF|CFR)\s+[A-Z]', clean)
+            if trade_m2:
+                bol.tradeTerm = trade_m2.group(1).upper()
+
+        # L/C Number
+        lc_m = re.search(r'L/C\s*(?:NUMBER|NO\.?)?[:\s]*([A-Z0-9]+)', clean, re.I)
+        if lc_m and not bol.lcNumber:
+            bol.lcNumber = lc_m.group(1).strip()
+
+        # Shipped on Board date
+        sob_m = re.search(r'SHIPPED\s+ON\s+BOARD', clean, re.I)
+        if sob_m and not bol.shippedOnBoardDate:
+            # Try to find date in same line or nearby (YYYY/MM/DD or DDMMMYYYY)
+            date_m = re.search(r'(\d{4}/\d{2}/\d{2}|\d{2}[A-Z]{3}\d{4})', clean)
+            if date_m:
+                bol.shippedOnBoardDate = date_m.group(1)
+
+        # Shipping Marks
+        marks_m = re.search(r'(?:SHIPPING\s*)?MARKS[:\s]+(.+)', clean, re.I)
+        if marks_m and not bol.shippingMarks:
+            val = marks_m.group(1).strip()
+            if val and len(val) > 1:
+                bol.shippingMarks = val
+
+        # Description of goods
+        if "shipper's load" in low or "shipper load" in low or "s.t.c." in low:
+            continue
         if any(k in low for k in ["marks & number", "marks and number", "container no",
                                    "description of goods", "quantity and", "gross weight",
-                                   "measurement"]):
-            continue  # Skip header labels
+                                   "measurement", "kind of package"]):
+            continue
 
-        # Skip pipe table headers
+        # Pipe table: extract HS code, weight, measurement, packages from cells
         if clean.startswith("|"):
-            # Extract meaningful cell content
             cells = [c.strip() for c in clean.split("|") if c.strip()]
             for cell in cells:
-                # Look for HS code in cells
-                hs_m2 = re.search(r'HS\s*CODE[:\s]*(\d{4,})', cell, re.I)
-                if hs_m2 and not bol.hsCode:
-                    bol.hsCode = hs_m2.group(1)
-                # Look for weight/measurement in cells
+                hs_m2 = re.search(r'HS[:\s]*(?:CODE)?[:\s]*(\d[\d\.]{3,})', cell, re.I)
+                if hs_m2 and not hs_code:
+                    hs_code = hs_m2.group(1)
                 wt_m2 = re.search(r'(\d[\d,\.]+)\s*(?:KGS|KG)', cell, re.I)
                 if wt_m2 and not bol.grossWeight:
                     bol.grossWeight = wt_m2.group(0).strip()
                 meas_m2 = re.search(r'(\d[\d,\.]+)\s*(?:CBM)', cell, re.I)
                 if meas_m2 and not bol.measurement:
                     bol.measurement = meas_m2.group(0).strip()
-                pkg_m2 = re.search(r'(\d+)\s*PACKAGE', cell, re.I)
+                pkg_m2 = re.search(r'(\d+)\s*(?:PACKAGE|PALLET|CASE|CARTON)', cell, re.I)
                 if pkg_m2 and not bol.packages:
                     bol.packages = pkg_m2.group(0).strip()
             continue
 
-        # Collect potential description lines
-        # Skip known noise: address-like content, shipper name repeats
+        # Collect goods description
         if len(clean) > 5 and not container_m and not weight_m and not meas_m and not hs_m:
             if not any(k in low for k in ["road,", "city,", "china", "vietnam", "viet nam",
                                            "made in", "6/f block", "phase 3"]):
-                # Check for meaningful goods description keywords
                 goods_kws = ["machine", "equipment", "tool", "device", "motor", "pump",
                              "valve", "pipe", "steel", "iron", "copper", "aluminum",
                              "chemical", "fabric", "textile", "garment", "furniture",
                              "electronic", "component", "part", "material", "product",
-                             "sander", "saw", "milling", "cnc", "radial", "brush"]
+                             "sander", "saw", "milling", "cnc", "radial", "brush",
+                             "yarn", "cotton", "weaving", "cone", "carton"]
                 if any(gk in low for gk in goods_kws):
                     description_parts.append(clean)
 
     if description_parts and not bol.description:
         bol.description = "; ".join(description_parts)
 
+    # Create BolItem if we have description or HS code
+    if (description_parts or hs_code) and not bol.itemList:
+        item = BolItem(
+            description="; ".join(description_parts) if description_parts else None,
+            hsCode=hs_code,
+        )
+        # Try to parse weight/quantity as float for the item
+        if bol.grossWeight:
+            try:
+                item.grossWeight = float(re.sub(r'[^\d.]', '', bol.grossWeight.split('KG')[0].replace(',', '')))
+            except (ValueError, IndexError):
+                pass
+        if bol.measurement:
+            try:
+                item.measurement = float(re.sub(r'[^\d.]', '', bol.measurement.split('CBM')[0].replace(',', '')))
+            except (ValueError, IndexError):
+                pass
+        bol.itemList.append(item)
+
 
 def parse_freight(block: List[str], bol: BillOfLading):
-    """Extract freight terms, delivery agent, number of originals."""
+    """Extract freight terms, delivery agent, number of originals, dates."""
     for line in block:
         clean = line.strip()
         low = clean.lower()
@@ -461,34 +525,44 @@ def parse_freight(block: List[str], bol: BillOfLading):
             val = re.sub(r'[\s|]+$', '', orig_m.group(1)).strip()
             bol.numberOfOriginals = val
 
-        # Laden on board date -> issueDate
-        laden_m = re.search(r'LADEN\s+ON\s+BOARD.*?(\d{2}[A-Z]{3}\d{4})', clean, re.I)
-        if laden_m and not bol.issueDate:
-            bol.issueDate = laden_m.group(1).strip()
+        # Total containers in words: SAY ONE (1) CASE ONLY / SAY ONE (1X40'HQ) CONTAINER ONLY
+        say_m = re.search(r'(SAY\s+.+(?:ONLY|CONTAINER))', clean, re.I)
+        if say_m and not bol.totalContainers:
+            bol.totalContainers = say_m.group(1).strip()
+
+        # Laden on board / Shipped on board date
+        laden_m = re.search(r'(?:LADEN\s+ON\s+BOARD|SHIPPED\s+ON\s+BOARD)', clean, re.I)
+        if laden_m:
+            date_m = re.search(r'(\d{2}[A-Z]{3}\d{4}|\d{4}/\d{2}/\d{2})', clean)
+            if date_m:
+                if not bol.shippedOnBoardDate:
+                    bol.shippedOnBoardDate = date_m.group(1)
+                if not bol.issueDate:
+                    bol.issueDate = date_m.group(1)
 
         # Place and date of Issue
         issue_m = re.search(r'Place\s+and\s+date\s+of\s+Issue', clean, re.I)
         if issue_m:
-            # Issue place/date is often in the next cell or after the label
             cells = [c.strip() for c in clean.split("|") if c.strip()]
             for cell in cells:
                 if "place and date" in cell.lower():
                     continue
-                # Look for location + date (e.g. "SHENZHEN, CHINA" or "03JAN2025")
-                date_m = re.search(r'(\d{2}[A-Z]{3}\d{4})', cell)
+                date_m = re.search(r'(\d{2}[A-Z]{3}\d{4}|\d{4}/\d{2}/\d{2})', cell)
                 if date_m and not bol.issueDate:
                     bol.issueDate = date_m.group(1)
                 elif len(cell) > 3 and not date_m and not bol.issuePlace:
                     bol.issuePlace = cell
 
-        # Standalone date pattern: 03JAN2025
+        # Standalone date pattern: 03JAN2025 or 2025/12/15
         if not bol.issueDate:
-            date_m = re.search(r'(\d{2}[A-Z]{3}\d{4})', clean)
+            date_m = re.search(r'(\d{2}[A-Z]{3}\d{4}|\d{4}/\d{2}/\d{2})', clean)
             if date_m:
                 bol.issueDate = date_m.group(1)
 
-        # S/O No
-        # (currently not in schema, but useful for reference)
+        # Type of Movement: CY-CY, CFS-CFS (also check in freight block)
+        mov_m = re.search(r'\b(C[YF]S?-C[YF]S?)\b', clean, re.I)
+        if mov_m and not bol.typeOfMovement:
+            bol.typeOfMovement = mov_m.group(1).upper()
 
 
 def parse_header(block: List[str], bol: BillOfLading):

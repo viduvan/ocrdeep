@@ -3,7 +3,7 @@
 Zoom text parser for Bill of Lading (B/L) documents.
 Parses the header crop (45%) OCR text to extract/refine:
 - B/L Number, Carrier name
-- Shipper info (name, address, tel, fax)
+- Shipper info (name, address, tel)
 - Consignee info (name, address, tax ID)
 - Notify party
 - Delivery agent
@@ -96,15 +96,12 @@ def _parse_shipper(lines: List[str], bol: BillOfLading):
         if low == "shipper" or low == "shipper:":
             continue
 
-        # Tel / Fax
+        # Tel / Fax (both go to shipperTel)
         tel_m = re.search(r'TEL[.:\s]*([+\d\-\s]+)', clean, re.I)
         fax_m = re.search(r'FAX[.:\s]*([+\d\-\s]+)', clean, re.I)
         if tel_m:
             if not bol.shipperTel:
                 bol.shipperTel = tel_m.group(1).strip()
-        if fax_m:
-            if not bol.shipperFax:
-                bol.shipperFax = fax_m.group(1).strip()
         if tel_m or fax_m:
             continue
 
