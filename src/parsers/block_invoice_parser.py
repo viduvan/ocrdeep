@@ -2537,7 +2537,7 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
                     parsed = safe_parse_float(v)
                     if parsed and parsed > max_val:
                         max_val = parsed
-                if max_val > 0:
+                if max_val > 10:
                     invoice.totalAmount = max_val
     
     # ===== CURRENCY DETECTION (Auto-detect from raw text) =====
@@ -3913,7 +3913,7 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
             # "EXPORT REFERENCES (i.e., order no., invoice no.)\n2786"
             r'EXPORT\s+REFERENCES[^\n]*\n\s*([A-Za-z0-9][\w\-/]+)',
             # "**Number:** INC 2025121" — standalone Number label (exclude Account Number, Phone Number, etc.)
-            r'(?<!Account\s)(?<!Phone\s)(?<!Fax\s)(?<!Serial\s)(?<!Tracking\s)(?<!IncoDocs\s)(?<![A-Za-z])Number\s*:\s*([A-Za-z0-9][\w \-/]{2,30})',
+            r'(?<!Account\s)(?<!Phone\s)(?<!Fax\s)(?<!Serial\s)(?<!Tracking\s)(?<!IncoDocs\s)(?<!Importer\s)(?<!Exporter\s)(?<!Order\s)(?<!Customer\s)(?<!Sales\s)(?<![A-Za-z])Number\s*:\s*([A-Za-z0-9][\w \-/]{2,30})',
             # "My Reference: REF11421" or "Reference: INV-2024" (fallback, only after all specific patterns)
             r'(?:My\s+)?Reference\s*:\s*([A-Za-z][\w\-/]{3,30})',
         ]
@@ -3944,7 +3944,7 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
                 val = m.group(1).strip().strip('*').strip('#')
                 if val and len(val) >= 1 and not re.fullmatch(r'\d{1,2}', val):
                     # Reject pure words, words with slashes like 'Shipper/Exporter'
-                    clean_val = val.replace('/', '').replace('-', '').replace('.', '')
+                    clean_val = val.replace('/', '').replace('-', '').replace('.', '').replace(' ', '')
                     if (val.lower() not in _bad_ids
                             and not re.fullmatch(r'[A-Za-z]+', clean_val)
                             and not re.fullmatch(r'[A-Za-z]+/[A-Za-z]+', val)):
@@ -4039,7 +4039,10 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
     
     # ===== CURRENCY =====
     if not invoice.currency:
-        if 'USD' in clean_text or '$' in clean_text:
+        # Check for EUR in table headers (e.g. "Value in EUR") before $->USD fallback
+        if re.search(r'(?:Value|Amount|Price|Total)\s+(?:in\s+)?EUR\b', clean_text, re.I) or re.search(r'\bEUR\s*[\d\.\,]+', clean_text, re.I) or '€' in clean_text:
+            invoice.currency = 'EUR'
+        elif 'USD' in clean_text or '$' in clean_text or re.search(r'U\.?S\.?\s+EXPORT', clean_text, re.I):
             invoice.currency = 'USD'
     
     # ===== TOTAL AMOUNT (EN patterns) =====
@@ -4664,7 +4667,7 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
         "không kê khai", "không chịu thuế", "tiền thuế", "số tiền viết bằng chữ",
         "người mua", "người bán", "chữ ký", "signature",
         # Shipping/logistics metadata — not line items (use specific patterns)
-        "incoterm", "ex works", "exw ", "fob ", "cif ",
+        "incoterm", "ex works",
         "despatch mode", "parcel nr", "gross weight",
     ]
     # Also filter items where productName is just a currency code
@@ -4694,10 +4697,14 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
             
             # Check for summary/total rows (e.g., "Sub Total", "-", blank name)
             name_stripped = name_lower.strip().strip('-').strip()
+            # Delivery term total/summary lines (EXW:, FOB:, CIF:, etc.)
+            _delivery_terms = ['exw', 'fob', 'cif', 'cfr', 'cip', 'cnf', 'dap', 'ddp', 'fca']
+            is_delivery_total = any(name_stripped.rstrip(':').strip() == dt for dt in _delivery_terms)
             is_summary_row = (
                 name_stripped in {s for s in SUMMARY_KEYWORDS} or
                 any(name_stripped == kw for kw in SUMMARY_KEYWORDS) or
-                (not name_stripped and item.unitPrice is None)  # blank/dash name with no price
+                (not name_stripped and item.unitPrice is None) or  # blank/dash name with no price
+                is_delivery_total
             )
             
             # Filter purely numeric short names (metadata from footer tables)

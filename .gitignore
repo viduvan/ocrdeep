@@ -126,3 +126,8 @@ coverage.xml
 *.bak
 *.orig
 debug_*.py
+
+
+
+.~lock.benchmark_commercial.xlsx#
+.~lock.benchmark_gtgt.xlsx#

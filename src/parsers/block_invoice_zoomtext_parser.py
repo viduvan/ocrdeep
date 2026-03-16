@@ -795,6 +795,8 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
     for line in lines:
         # Strip markdown bold markers before parsing
         clean = re.sub(r'\*\*([^*]+)\*\*', r'\1', line.strip()).strip()
+        # Strip markdown heading prefixes (## , ### , etc.)
+        clean = re.sub(r'^#+\s+', '', clean).strip()
         low = clean.lower()
 
         # Invoice ID: INV. NO.: INV250405 or "Invoice Number:\s+XXX"
@@ -812,12 +814,12 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
                 if m_no:
                     # Reject if preceded by non-invoice context (CUSTOMER, DELIVERY, note, parcel)
                     _pre_ctx = clean[:m_no.start()].strip().lower()
-                    if not any(k in _pre_ctx for k in ['customer', 'delivery', 'note', 'parcel', 'iban', 'bic']):
+                    if not any(k in _pre_ctx for k in ['customer', 'delivery', 'note', 'parcel', 'iban', 'bic', 'importer', 'exporter', 'vat', 'reg', 'order', 'sales']):
                         invoice.invoiceID = m_no.group(1).strip()
                         _pending_invoice_id = False
             # Pattern: "Invoice Number & Date" or "INV.NO." (label only, value on next line)
             if not invoice.invoiceID and re.match(
-                r'(?:Invoice\s*Number\s*(?:&|and)\s*Date|Invoice\s*Number|Invoice\s*#|INV\.?\s*NO\.?)\s*$',
+                r'(?:Invoice\s*Number\s*(?:&|and)\s*Date|Invoice\s*Number|Invoice\s*No\.?|Invoice\s*#|INV\.?\s*NO\.?)\s*$',
                 clean, re.I
             ):
                 _pending_invoice_id = True
@@ -832,7 +834,7 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
         # Pending invoice ID: next non-empty line with digits is the ID
         if _pending_invoice_id and not invoice.invoiceID:
             val = clean.strip()
-            if val and re.match(r'^[A-Za-z0-9][\w\-/]*$', val) and len(val) >= 2:
+            if val and re.match(r'^#?[A-Za-z0-9][\w\-/]*$', val) and len(val) >= 1:
                 invoice.invoiceID = val
                 _pending_invoice_id = False
                 continue
