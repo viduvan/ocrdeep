@@ -791,6 +791,7 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
     }
 
     _pending_invoice_id = False
+    _pending_payment_method = False
     for line in lines:
         # Strip markdown bold markers before parsing
         clean = re.sub(r'\*\*([^*]+)\*\*', r'\1', line.strip()).strip()
@@ -871,7 +872,10 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
                 if _stripped_stars.startswith('(') and _stripped_stars.endswith(')'):
                     pass  # subtitle like *(VAT INVOICE)* — skip
                 elif name_clean and 5 < len(name_clean) < 80:
-                    invoice.invoiceName = name_clean
+                    # Only override existing invoiceName if new value has strong signal (HÓA ĐƠN)
+                    # Prevent garbage OCR like "SỔ phiếu" from overriding correct rawtext value
+                    if not invoice.invoiceName or "HÓA ĐƠN" in name_clean.upper():
+                        invoice.invoiceName = name_clean
         # Continuation: "GIÁ TRỊ GIA TĂNG" or "KIÊM VẬN CHUYỂN" on separate line
         elif invoice.invoiceName:
             if "GIÁ TRỊ" in up and "GIÁ TRỊ" not in invoice.invoiceName.upper():
@@ -908,9 +912,9 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
                 if m:
                     invoice.invoiceDate = f"{m.group(3).zfill(2)}/{m.group(2).zfill(2)}/{m.group(1)}"
 
-            # Pattern: Ngày: M/D/YYYY or Ngày: DD/MM/YYYY (VN short form)
+            # Pattern: Ngày: M/D/YYYY or Ngày: DD/MM/YYYY or Ngày lập: DD/MM/YYYY (VN short form)
             if not invoice.invoiceDate:
-                m = re.search(r"[Nn]gày[:\s]+(\d{1,2})/(\d{1,2})/(\d{4})", clean)
+                m = re.search(r"[Nn]gày(?:\s+lập)?[:\s]+(\d{1,2})/(\d{1,2})/(\d{4})", clean)
                 if m:
                     # Ambiguous: treat as M/D/YYYY if month > 12 swap, else D/M
                     p1, p2, yr = int(m.group(1)), int(m.group(2)), m.group(3)
@@ -919,27 +923,59 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
                     else:        # treat as M/D/YYYY (US format common in EN invoices)
                         invoice.invoiceDate = f"{str(p2).zfill(2)}/{str(p1).zfill(2)}/{yr}"
 
-            # Pattern: Ngày DD tháng MM năm YYYY (VN full)
+            # Pattern: Ngày DD tháng MM năm YYYY (VN full, also handles 20...21... year)
             if not invoice.invoiceDate:
-                m = re.search(r"Ngày\s*(?:\([^)]*\)\s*)?\s*(\d{1,2})\s+tháng\s*(?:\([^)]*\)\s*)?\s*(\d{1,2})\s+năm\s*(?:\([^)]*\)\s*)?\s*(\d{4})", clean, re.I)
+                m = re.search(r"Ngày\s*(?:\*?\([^)]*\)\*?\s*)?[\s*]*(\d{1,2})\s+tháng\s*(?:\*?\([^)]*\)\*?\s*)?[\s*]*(\d{1,2})\s+năm\s*(?:\*?\([^)]*\)\*?\s*)?[\s*]*(\d{2,4})[\.\s]*(\d{0,2})", clean, re.I)
                 if m:
-                    invoice.invoiceDate = f"{m.group(1).zfill(2)}/{m.group(2).zfill(2)}/{m.group(3)}"
+                    year = m.group(3) + (m.group(4) or '')
+                    if len(year) == 4:
+                        invoice.invoiceDate = f"{m.group(1).zfill(2)}/{m.group(2).zfill(2)}/{year}"
 
         # Payment Method: "PAYMENT: T/T" or "Payment method: Wire Transfer"
+        # Also VN: "Hình thức thanh toán: TM/CK" or "Hình thức thanh toán (Payment method): TM/CK"
         if not invoice.paymentMethod:
+            # Try VN pattern first (may contain embedded EN annotation in parentheses)
             m_pm = re.search(
-                r'(?:payment\s*(?:method|terms?|by)?|terms?\s+of\s+payment)\s*[:\s]\s*([^\n|]+)',
+                r'hình thức thanh toán(?:\s*\([^)]*\))?\s*[:\s]\s*([^\n|]+)',
                 clean, re.I
             )
+            # Fallback to EN pattern
+            if not m_pm:
+                m_pm = re.search(
+                    r'(?:payment\s*(?:method|terms?|by)?|terms?\s+of\s+payment)\s*[:\s]\s*([^\n|]+)',
+                    clean, re.I
+                )
             if m_pm:
-                pm_val = m_pm.group(1).strip().strip('*|')
+                pm_val = m_pm.group(1).strip().strip('*|"\'')
+                # Clean residual annotation noise
+                pm_val = re.sub(r'^\(?[Pp]ayment\s*(?:method|terms?)?\)?\s*[:\s]*', '', pm_val).strip()
                 pm_low = pm_val.lower()
-                # Reject bank-related values
+                # Reject bank-related values and empty/garbage
                 if pm_val and len(pm_val) >= 2 and not any(
                     pm_low.startswith(k) for k in [
                         'beneficiary', 'account', 'bank', 'swift', 'iban',
                         'address', 'room ', 'floor ']):
                     invoice.paymentMethod = pm_val
+            # If label found but no valid value extracted → set pending for next line
+            if not invoice.paymentMethod and re.search(
+                    r'(?:hình thức thanh toán|payment\s*(?:method|terms?))', clean, re.I):
+                _pending_payment_method = True
+
+        # Handle pending payment method from previous line
+        if _pending_payment_method and not invoice.paymentMethod:
+            val = clean.strip().strip('*"\'')
+            if val and ':' not in val and len(val) >= 2 and len(val) <= 20:
+                invoice.paymentMethod = val
+                _pending_payment_method = False
+
+        # Currency: "Đồng tiền thanh toán: VND" or "Currency: USD"
+        if not invoice.currency:
+            m_cur = re.search(
+                r'(?:đồng tiền thanh toán|đồng tiền|currency)\s*[:\s]\s*([A-Za-z]{3})',
+                clean, re.I
+            )
+            if m_cur:
+                invoice.currency = m_cur.group(1).upper()
 
 
 def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
@@ -1183,7 +1219,7 @@ def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
         # --- Invoice Serial (VN format: Ký hiệu / Serial) ---
         if not serial_parsed:
             if "ký hiệu" in low or "kí hiệu" in low or "serial" in low:
-                m = re.search(r"(?:ký hiệu|kí hiệu|serial)[^:\d]*[:\s]+([A-Z0-9/\-]+)", line, re.I)
+                m = re.search(r"(?:ký hiệu|kí hiệu|serial)[^:\d]*[:\s\*]+([A-Z0-9/\-]+)", line, re.I)
                 if m:
                     val = m.group(1).strip()
                     if len(val) >= 3:
@@ -1237,6 +1273,12 @@ def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
                 if f and not invoice.invoiceFormNo:
                     invoice.invoiceFormNo = f
                 break
+
+    # ── VND Currency Fallback: VN GTGT invoices default to VND ─────────────
+    if not invoice.currency and invoice.invoiceName:
+        _inv_name_upper = invoice.invoiceName.upper()
+        if "HÓA ĐƠN" in _inv_name_upper or "PHIẾU" in _inv_name_upper:
+            invoice.currency = "VND"
 
 
 def parse_zoom_right_header(lines: List[str], invoice: Invoice):

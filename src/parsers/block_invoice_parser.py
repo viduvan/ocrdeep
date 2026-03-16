@@ -456,6 +456,16 @@ def clean_lines(raw_text: str) -> List[str]:
         if line in ['"', "'"]:
             continue
 
+        # Strip leading/trailing quote characters (OCR artifact from text wrapped in quotes)
+        # Only strip if the quote is NOT matched (i.e., orphan quote at start or end)
+        if line.startswith('"') and not line.endswith('"'):
+            line = line[1:].strip()
+        elif line.endswith('"') and not line.startswith('"'):
+            line = line[:-1].strip()
+        
+        if not line:
+            continue
+
         lines.append(line)
     return lines
 
@@ -496,7 +506,9 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
 
         # ===== HEADER (CHỈ KHI GẶP HÓA ĐƠN hoặc PHIẾU) =====
         # Note: Title may be split across lines like "# HÓA ĐƠN\nGIÁ TRỊ GIA TĂNG"
-        if any(k in l for k in [
+        # GUARD: Do NOT reclassify pipe-table rows as header when already in table mode
+        # (e.g. product name "Kỳ hóa đơn" contains "hóa đơn" but is a data row)
+        if current != "table" and not (seen_table and l.startswith("|")) and (any(k in l for k in [
             "hóa đơn",                  # Added: partial match for multi-line titles
             "phiếu xuất kho",            # Added: Internal transfer slips
             "phiếu nhập kho",            # Added: Internal receipt slips
@@ -521,7 +533,7 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
         ]) or (
             # Standalone "## INVOICE" heading (markdown format, no prefix like COMMERCIAL/TAX)
             l.lstrip('#').strip() == 'invoice'
-        ):
+        )):
             current = "header"
             seen_header = True
 
@@ -751,9 +763,12 @@ def parse_header(block: List[str], invoice: Invoice):
 
         # Date: Ngày 18 tháng 12 năm 2025
         # Date: Ngày (date) 20 tháng (month) 10 năm (year) 2025
-        m = re.search(r"Ngày.*?(\d{1,2}).*?tháng.*?(\d{1,2}).*?năm.*?(\d{4})", line, re.I)
+        # Date: Ngày 23...tháng...03...năm 20...21... (handwritten with dots)
+        m = re.search(r"Ngày.*?(\d{1,2}).*?tháng.*?(\d{1,2}).*?năm.*?(\d{2,4})[\.\.\s]*(\d{0,2})", line, re.I)
         if m and not invoice.invoiceDate:
-            invoice.invoiceDate = f"{m.group(1).zfill(2)}/{m.group(2).zfill(2)}/{m.group(3)}"
+            year = m.group(3) + (m.group(4) or '')
+            if len(year) == 4:
+                invoice.invoiceDate = f"{m.group(1).zfill(2)}/{m.group(2).zfill(2)}/{year}"
         
         # English date patterns: Date: 2025/12/1, Date: 2025-12-01
         if not invoice.invoiceDate:
@@ -794,7 +809,9 @@ def parse_header(block: List[str], invoice: Invoice):
 
         # Form No (mẫu số) - ít dùng trong hóa đơn điện tử mới
         # Skip lines containing "hóa đơn bị hủy" - these reference cancelled invoices
-        if "mẫu số" in low and "hóa đơn bị hủy" not in low and "hoá đơn bị huỷ" not in low:
+        # Skip lines containing "điều chỉnh" - these reference the original invoice, not the current one
+        if ("mẫu số" in low and "hóa đơn bị hủy" not in low 
+                and "hoá đơn bị huỷ" not in low and "điều chỉnh" not in low):
             m = re.search(r":\s*(\S+)", line)
             if m:
                 invoice.invoiceFormNo = m.group(1)
@@ -802,10 +819,11 @@ def parse_header(block: List[str], invoice: Invoice):
         # Serial - ĐÂY LÀ TRƯỜNG QUAN TRỌNG
         # Pattern: Ký hiệu (Serial No): 1C25TTD, Kí hiệu(Serial): 1C25THO
         # Pattern variations: "Ký hiệu: 1C24THO", "Ký hiệu 1C24THO", "Ký hiệu:1C24THO"
-        # BỎ QUA dòng "Thay thế cho Hóa đơn..." và "Hóa đơn bị hủy" vì đây không phải serial chính
+        # BỎ QUA dòng "Thay thế cho Hóa đơn...", "Hóa đơn bị hủy", "Điều chỉnh" vì đây không phải serial chính
         if (("ký hiệu" in low or "kí hiệu" in low or "serial" in low) and 
             not serial_parsed and 
-            "hóa đơn bị hủy" not in low and "hoá đơn bị huỷ" not in low):
+            "hóa đơn bị hủy" not in low and "hoá đơn bị huỷ" not in low
+            and "điều chỉnh" not in low):
             # Skip các dòng thay thế
             if "thay thế" in low:
                 continue
@@ -892,7 +910,10 @@ def parse_seller(lines: List[str], invoice: Invoice):
             # Skip table lines (|...|), markdown headers still present, and overly long lines
             is_table_line = clean.startswith("|")
             is_too_long = len(clean) > 80
+            # Skip page separator lines like "--- PAGE 1 ---"
+            is_page_separator = bool(re.match(r'^---\s*PAGE\s+\d+\s*---$', clean, re.I))
             if (not is_keyword and not is_header_label and not is_table_line and not is_too_long
+                    and not is_page_separator
                     and ":" not in clean and len(clean) > 3):
                 if not invoice.sellerName:
                     invoice.sellerName = clean
@@ -1518,7 +1539,7 @@ def parse_table(block: List[str], invoice: Invoice):
             if nums:
                 try:
                     first_num = nums[0].replace('.', '')
-                    if first_num.isdigit():
+                    if first_num.isdigit() and int(first_num) >= 100:
                         invoice.preTaxPrice = float(first_num)
                 except:
                     pass
@@ -1911,7 +1932,7 @@ def parse_total(block: List[str], invoice: Invoice):
     if all_numbers:
         max_num = max(all_numbers)
         # Only use fallback if totalAmount is not set
-        if not invoice.totalAmount:
+        if not invoice.totalAmount and max_num >= 100:
             # Validate against item amounts if available
             if invoice.itemList:
                 item_sum = sum(it.amount or 0 for it in invoice.itemList)
@@ -2332,15 +2353,23 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
                 invoice.invoiceFormNo = m.group(2)
                 print(f"DEBUG: Found FormNo via BIÊN BẢN HỦY format: Serial='{m.group(1)}', FormNo='{m.group(2)}'")
         
+        # Pattern 0b: Direct "Mẫu số:" extraction (may be outside header block)
+        if not invoice.invoiceFormNo:
+            m_mau = re.search(r'[Mm]ẫu\s*số[^:\n]*:\s*(\S+)', raw_text)
+            if m_mau:
+                _mau_val = m_mau.group(1).strip()
+                if len(_mau_val) >= 3:
+                    invoice.invoiceFormNo = _mau_val
+
         # Pattern 1: Ký hiệu: 1C25THO hoặc Kí hiệu (Serial No): 1C25TTD hoặc Ký hiệu (Series): 1C25TLT
         # Skip lines with "thay thế" (replacement invoice references)
         if not invoice.invoiceFormNo:
             lines = raw_text.split('\\n')  # Handle escaped newlines
             for line in lines:
                 low = line.lower()
-                if ('ký hiệu' in low or 'kí hiệu' in low) and 'thay thế' not in low and 'hóa đơn bị hủy' not in low:
+                if ('ký hiệu' in low or 'kí hiệu' in low) and 'thay thế' not in low and 'hóa đơn bị hủy' not in low and 'điều chỉnh' not in low:
                     # Extract value after colon - support Series/Serial keywords
-                    m = re.search(r'(?:ký hiệu|kí hiệu)\s*(?:\([^)]*\))?\s*[:\s]+([A-Z0-9]+)', line, re.I)
+                    m = re.search(r'(?:ký hiệu|kí hiệu)\s*(?:\([^)]*\))?\s*[:\s]+([A-Z0-9/\-]+)', line, re.I)
                     if m:
                         serial_value = m.group(1).strip()
                         serial, form_no = parse_serial_form_no(serial_value)
@@ -3924,6 +3953,18 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
     
     # ===== INVOICE DATE =====
     if not invoice.invoiceDate:
+        # Vietnamese fallback: Ngày DD tháng MM năm YYYY (also handles 20...21... split year)
+        m_vn = re.search(r"Ngày.*?(\d{1,2}).*?tháng.*?(\d{1,2}).*?năm.*?(\d{2,4})[\.\s]*(\d{0,2})", clean_text, re.I)
+        if m_vn:
+            year = m_vn.group(3) + (m_vn.group(4) or '')
+            if len(year) == 4:
+                invoice.invoiceDate = f"{m_vn.group(1).zfill(2)}/{m_vn.group(2).zfill(2)}/{year}"
+        # Vietnamese short: Ngày lập: DD/MM/YYYY
+        if not invoice.invoiceDate:
+            m_vn2 = re.search(r"[Nn]gày(?:\s+lập)?[:\s]+(\d{1,2})/(\d{1,2})/(\d{4})", clean_text)
+            if m_vn2:
+                invoice.invoiceDate = f"{m_vn2.group(1).zfill(2)}/{m_vn2.group(2).zfill(2)}/{m_vn2.group(3)}"
+    if not invoice.invoiceDate:
         months = {'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 'may': '05', 'jun': '06',
                   'jul': '07', 'aug': '08', 'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12',
                   'january': '01', 'february': '02', 'march': '03', 'april': '04',
@@ -4114,6 +4155,24 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
     parse_buyer(blocks["buyer"], invoice)
     parse_table(blocks["table"], invoice)
     parse_total(blocks["total"], invoice)
+    
+    # ===== Vietnamese date fallback =====
+    # When date line (Ngày...tháng...năm) ends up outside header block (e.g., buyer block
+    # due to keyword routing like "Liên 2 Giao cho người mua"), parse_header misses it.
+    if not invoice.invoiceDate:
+        _text_for_date = raw_text.split('--- ZOOM TEXT ---')[0]
+        _clean_date = re.sub(r'\*\*([^*]+)\*\*', r'\1', _text_for_date)
+        # Full VN: Ngày DD tháng MM năm YYYY (also 20...21... split year)
+        _m_vn = re.search(r"Ngày.*?(\d{1,2}).*?tháng.*?(\d{1,2}).*?năm.*?(\d{2,4})[\.\s]*(\d{0,2})", _clean_date, re.I)
+        if _m_vn:
+            _yr = _m_vn.group(3) + (_m_vn.group(4) or '')
+            if len(_yr) == 4:
+                invoice.invoiceDate = f"{_m_vn.group(1).zfill(2)}/{_m_vn.group(2).zfill(2)}/{_yr}"
+        # Short VN: Ngày lập: DD/MM/YYYY
+        if not invoice.invoiceDate:
+            _m_vn2 = re.search(r"[Nn]gày(?:\s+lập)?[:\s]+(\d{1,2})/(\d{1,2})/(\d{4})", _clean_date)
+            if _m_vn2:
+                invoice.invoiceDate = f"{_m_vn2.group(1).zfill(2)}/{_m_vn2.group(2).zfill(2)}/{_m_vn2.group(3)}"
     
     # Deduction-based total: if a pipe-table row with "DEDUCTION" exists,
     # the last monetary value is the net payable total
@@ -4518,6 +4577,8 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
         r'^client\s+details?$',
         r'^my\s+details?$',
         r'^-{2,}$',
+        r'^\.{2,}$',             # dots-only placeholder ("......" )
+        r'^[.\s]+$',             # dots and spaces only
         # Invoice metadata labels — not buyer/seller names
         r'^(?:Invoice|Order|Purchase)\s*(?:No|Number|#)',
         r'^(?:P\.?O\.?)\s*(?:No|Number)',
@@ -4542,6 +4603,17 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
                 if _addr_is_meta or _addr_is_code:
                     setattr(invoice, addr_field, None)
     
+    # ---- VN BUYER NAME FALLBACK: "Họ tên người mua hàng: NAME" ----
+    if not invoice.buyerName:
+        _text_before_zoom = raw_text.split('--- ZOOM TEXT ---')[0]
+        _clean_bfz = re.sub(r'\*\*([^*]+)\*\*', r'\1', _text_before_zoom)
+        m_vn_buyer = re.search(r'[Hh]ọ tên người mua hàng[:\s]+([^\n]+)', _clean_bfz)
+        if m_vn_buyer:
+            _bname = m_vn_buyer.group(1).strip().strip(':').strip()
+            # Reject placeholder values
+            if _bname and not re.match(r'^[.\s]+$', _bname) and len(_bname) > 2:
+                invoice.buyerName = _bname
+
     # ---- BUYER FALLBACK: "CLIENT DETAILS" / "Client:" section (runs after garbage rejection) ----
     if not invoice.buyerName and _is_en_invoice(raw_text):
         _text_before_zoom = raw_text.split('--- ZOOM TEXT ---')[0]

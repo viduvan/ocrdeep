@@ -1,6 +1,8 @@
 # ===========================
 # Data Files
 # ===========================
+case bol.xlsx
+case invoice GTGT.xlsx
 Data.xlsx
 *.xlsx
 *.csv
