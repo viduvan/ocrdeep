@@ -41,6 +41,7 @@ def _detect_zoom_blocks(lines: List[str]):
     SELLER_TRIGGERS = [
         "the seller:", "seller:", "shipper:", "shipper name", "beneficiary:",
         "đơn vị bán hàng", "đơn vị bán", "bên a", "bên bán",
+        "người bán",  # Case 171: "Người bán: Tan TinCay Partners"
         # EN Commercial Invoice
         "exporter:", "exporter details", "exporter name", "sender:", "sender name", "sender",
         "ship from", "bill from", "billed from", "shipper/exporter",
@@ -52,6 +53,7 @@ def _detect_zoom_blocks(lines: List[str]):
     BUYER_TRIGGERS = [
         "the buyer:", "buyer:", "consignee:", "consignee", "bill to:", "bill to", "billed to",
         "khách hàng", "đơn vị mua", "bên b", "bên mua",
+        "người mua",  # Case 171: "Người mua: Phoenix Spring Advisory"
         "tên người mua hàng", "họ tên người mua",
         "tên đơn vị mua", "người mua hàng:", "người mua",
         # EN Commercial Invoice
@@ -64,7 +66,7 @@ def _detect_zoom_blocks(lines: List[str]):
     HEADER_TRIGGERS = [
         "commercial invoice", "proforma invoice", "pro forma invoice",
         "tax invoice", "packing list",
-        "vat invoice", "hóa đơn", "phiếu",
+        "vat invoice", "hóa đơn", "hòa đơn", "phiếu",
         "inv. no", "inv no", "invoice no",
         "invoice number", "invoice #",
         "inv. date", "s/c no", "payment",
@@ -79,7 +81,7 @@ def _detect_zoom_blocks(lines: List[str]):
     INVOICE_TYPE_KEYWORDS = {'invoice', 'commercial invoice', 'proforma invoice',
                               'pro forma invoice', 'tax invoice', 'vat invoice',
                               'packing list',
-                              'hóa đơn', 'phiếu'}
+                              'hóa đơn', 'hòa đơn', 'phiếu'}
     first_content_idx = None
     for i, line in enumerate(lines):
         stripped = line.strip().strip('*').strip()
@@ -136,6 +138,9 @@ def _detect_zoom_blocks(lines: List[str]):
 
         # Skip ZOOM TEXT markers
         if 'zoom text' in l and l.strip('-').strip().replace('zoom text', '').strip() == '':
+            continue
+        # Skip ZOOM RIGHT markers (Case 171)
+        if 'zoom right' in l and l.strip('-').strip().replace('zoom right', '').strip() == '':
             continue
 
         # SELLER triggers (highest priority on this line)
@@ -859,7 +864,7 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
         invoice_type_keywords = [
             "COMMERCIAL INVOICE", "PROFORMA INVOICE", "TAX INVOICE",
             "VAT INVOICE", "PACKING LIST",
-            "HÓA ĐƠN", "PHIẾU",
+            "HÓA ĐƠN", "HÒA ĐƠN", "PHIẾU",  # HÒA ĐƠN: OCR misspelling (Case 171)
         ]
         up = clean.upper()
         if any(kw in up for kw in invoice_type_keywords):
@@ -876,7 +881,7 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
                 elif name_clean and 5 < len(name_clean) < 80:
                     # Only override existing invoiceName if new value has strong signal (HÓA ĐƠN)
                     # Prevent garbage OCR like "SỔ phiếu" from overriding correct rawtext value
-                    if not invoice.invoiceName or "HÓA ĐƠN" in name_clean.upper():
+                    if not invoice.invoiceName or "HÓA ĐƠN" in name_clean.upper() or "HÒA ĐƠN" in name_clean.upper():
                         invoice.invoiceName = name_clean
         # Continuation: "GIÁ TRỊ GIA TĂNG" or "KIÊM VẬN CHUYỂN" on separate line
         elif invoice.invoiceName:
@@ -1196,6 +1201,8 @@ def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
 
     # ── Clean up buyerAddress: remove non-address noise ───────────────────
     if invoice.buyerAddress:
+        # Strip ZOOM markers (Case 171: "--- ZOOM RIGHT ---" appended to address)
+        invoice.buyerAddress = re.sub(r',?\s*---\s*ZOOM\s+(?:RIGHT|TEXT|LEFT)\s*---.*$', '', invoice.buyerAddress, flags=re.I).strip()
         _addr_parts = [p.strip() for p in invoice.buyerAddress.split(', ')]
         _clean_parts = [
             p for p in _addr_parts
@@ -1252,7 +1259,8 @@ def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
             # Strip ALL asterisk markers for robust matching (handles nested bold like **Số *(Invoice No.)*: 00000438**)
             _clean_no_stars = re.sub(r'\*+', '', clean).strip()
             # Match standalone "Số" label with optional parenthetical annotation
-            m = re.search(r"(?:^|\s)(?:Số|So)\s*(?:\([^)]*\))?\s*:\s*(\d+)", _clean_no_stars, re.I)
+            # Support both pure digits (00000438) and alphanumeric IDs (INV-40885)
+            m = re.search(r"(?:^|\s)(?:Số|So)\s*(?:\([^)]*\))?\s*:\s*([A-Za-z0-9][\w\-/]*)", _clean_no_stars, re.I)
             if m:
                 invoice.invoiceID = m.group(1)
 

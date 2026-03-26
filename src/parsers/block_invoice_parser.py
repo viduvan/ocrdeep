@@ -372,6 +372,7 @@ def _parse_word_group(text: str, ones: dict, tens_map: dict, scales: dict) -> in
 SELLER_LABEL_KEYS = {
     "sellerName": ["tên đơn vị bán", "đơn vị bán", "đơn vị bán hàng", "comname", "dơn vị bán hàng",
                    "bên a (bên bán)", "bên bán", "bên a",
+                   "người bán",  # Case 171: "Người bán: Tan TinCay Partners"
                    # EN Commercial Invoice labels
                    "the seller", "shipper", "beneficiary", "exporter",
                    "sender", "sender name", "sender/exporter", "vendor/exporter",
@@ -484,6 +485,8 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
     for line in lines:
         if '--- ZOOM TEXT ---' in line or '---ZOOM TEXT---' in line:
             break  # Stop processing at ZOOM TEXT marker
+        if '--- ZOOM RIGHT ---' in line or '---ZOOM RIGHT---' in line:
+            break  # Stop processing at ZOOM RIGHT marker (Case 171)
         filtered_lines.append(line)
     lines = filtered_lines
     
@@ -510,6 +513,7 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
         # (e.g. product name "Kỳ hóa đơn" contains "hóa đơn" but is a data row)
         if current != "table" and not (seen_table and l.startswith("|")) and (any(k in l for k in [
             "hóa đơn",                  # Added: partial match for multi-line titles
+            "hòa đơn",                  # Case 171: OCR misspelling with grave accent
             "phiếu xuất kho",            # Added: Internal transfer slips
             "phiếu nhập kho",            # Added: Internal receipt slips
             "phiếu bán hàng",             # Added: Sales slips
@@ -542,6 +546,7 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
         # HOẶC nếu đang ở Header mà thấy MST/Địa chỉ/SĐT (dấu hiệu seller info) thì chuyển sang Seller
         # Support English: "THE Seller:", "SHIPPER" and Vietnamese: "BÊN A (Bên bán)"
         elif any(k in l for k in ["đơn vị bán hàng", "seller:", "seller :", "the seller:", "bên a (bên bán)", "bên bán)", "bên a:",
+                                    "người bán:",  # Case 171: "Người bán: Tan TinCay Partners"
                                     "shipper", "寄货人",
                                     # EN Commercial Invoice seller section labels
                                     "exporter:", "exporter details", "sender/exporter",
@@ -561,6 +566,7 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
             "họ tên người mua",
             "tên người mua",       # Added: "Tên người mua:"
             "người mua hàng",
+            "người mua:",          # Case 171: exact match with colon to avoid matching "người mua hàng"
             "người mua",
             "buyer:",
             "buyer :",
@@ -848,8 +854,8 @@ def parse_header(block: List[str], invoice: Invoice):
             clean_line = line.strip()
             is_table_header = "stt" in low or "|" in line or "mẫu số" in low or "mẫu" in low
             if re.match(r'^(?:Số|So|No\.?)\b', clean_line, re.I) and "tài khoản" not in low and "tiền" not in low and not is_table_header:
-                # Handle markdown formatting: **00000438**
-                m = re.search(r"(?:Số|So|No\.?)[^:]*[:\s]+\*{0,2}(\d+)\*{0,2}", clean_line, re.I)
+                # Handle markdown formatting: **00000438** and alphanumeric IDs like INV-40885
+                m = re.search(r"(?:Số|So|No\.?)[^:]*[:\s]+\*{0,2}([A-Za-z0-9][\w\-/]*)\*{0,2}", clean_line, re.I)
                 if m:
                     # Reject if followed by address text (e.g. "No. 7 Bang Lang 1 Street")
                     _after_id = clean_line[m.end():].strip().lower()
@@ -4970,5 +4976,25 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
         if 1900 <= invoice.totalAmount <= 2100:
             invoice.totalAmount = None
             invoice.invoiceTotalInWord = None
+
+    # ===== Fallback: derive tax fields from item-level data when total block is empty =====
+    # Case 171: all financial data (preTaxPrice, taxPercent, taxAmount) is in the table,
+    # not in a separate total section. Derive from items when missing.
+    if invoice.itemList and len(invoice.itemList) == 1:
+        item = invoice.itemList[0]
+        # Derive preTaxPrice from item amount
+        if not invoice.preTaxPrice and item.amount:
+            invoice.preTaxPrice = item.amount
+        # Derive taxAmount from totalAmount - preTaxPrice
+        if not invoice.taxAmount and invoice.totalAmount and invoice.preTaxPrice:
+            _tax_calc = invoice.totalAmount - invoice.preTaxPrice
+            if _tax_calc > 0:
+                invoice.taxAmount = round(_tax_calc, 2)
+        # Derive taxPercent from the raw text table (look for % in header-mapped tax_rate column)
+        if not invoice.taxPercent:
+            _raw_before_zoom = raw_text.split('--- ZOOM TEXT ---')[0].split('--- ZOOM RIGHT ---')[0]
+            _tax_pct_m = re.search(r'(?<!\d)(\d{1,2})%', _raw_before_zoom)
+            if _tax_pct_m:
+                invoice.taxPercent = _tax_pct_m.group(1) + '%'
 
     return invoice

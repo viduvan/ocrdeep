@@ -19,7 +19,7 @@ Local Vision OCR API sử dụng:
 
 ---
 
-## 📦 Architecture
+## Architecture
 
 ```
 Client
@@ -51,18 +51,18 @@ DeepSeek-OCR Model (GPU)
 
 ---
 
-## ⚙️ Setup
+##  Setup
 
-### 1️⃣ Clone project
+### 1️Clone project
 
 ```bash
 git clone <your-repo>
 cd <project-folder>
 ```
 
-### 2️⃣ Build images
+### 2️ Build images
 
-✅ **Recommended:**
+ **Recommended:**
 ```bash
 docker compose build
 ```
@@ -72,7 +72,7 @@ docker compose build
 docker compose build --no-cache
 ```
 
-### 3️⃣ Run services
+### 3️Run services
 
 ```bash
 docker compose up -d
@@ -85,7 +85,7 @@ docker compose up -d --build
 
 ---
 
-## 🧪 Verify
+## Verify
 
 **Check containers:**
 ```bash
@@ -109,7 +109,7 @@ http://<server-ip>:8888/docs
 
 ---
 
-## 📂 Project Structure
+##  Project Structure
 
 | File | Description |
 | :--- | :--- |
@@ -121,7 +121,7 @@ http://<server-ip>:8888/docs
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 Các thông số chính trong `docker-compose.yml`:
 
@@ -135,7 +135,7 @@ Các thông số chính trong `docker-compose.yml`:
 
 ---
 
-## 📋 Logs
+##  Logs
 
 **Xem log realtime:**
 ```bash
@@ -155,7 +155,7 @@ docker compose down
 
 ---
 
-## ❓ Troubleshooting
+##  Troubleshooting
 
 | Lỗi | Nguyên nhân | Cách fix |
 | :--- | :--- | :--- |
