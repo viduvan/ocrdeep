@@ -997,6 +997,15 @@ def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
     4. For English invoices, use EN-specific handlers.
     """
 
+    # ── Normalize literal \\n (two-char backslash + n) to real newlines ─────
+    # OCR output sometimes contains literal \\n instead of real newlines.
+    # If lines list has very few items but contains literal \\n, re-split.
+    if lines and len(lines) <= 3:
+        _joined = '\n'.join(lines)
+        if '\\n' in _joined:
+            _cleaned = _joined.replace('\\n', '\n')
+            lines = [l.strip() for l in _cleaned.splitlines() if l.strip()]
+
     # ── Two-column pipe-table: Exporter/Shipper | Importer/Consignee ────────
     # Detect side-by-side seller/buyer table and extract fields
     _full_text = '\n'.join(lines)

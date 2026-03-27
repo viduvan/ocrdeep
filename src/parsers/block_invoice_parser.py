@@ -384,7 +384,7 @@ SELLER_LABEL_KEYS = {
     "sellerTaxCode": ["mã số thuế", "tax code", "mst", "vat:",
                       # EN labels
                       "tax id", "tax id/vat", "vat reg no", "vat reg no.",
-                      "eori", "gst no", "roc"],
+                      "eori", "gst no"],
     "sellerAddress": ["địa chỉ", "address",
                       # EN labels
                       "street address", "company address", "registered address",
@@ -730,6 +730,14 @@ def parse_header(block: List[str], invoice: Invoice):
             # For "COMMERCIAL INVOICE - No20250321003", strip the No... part for invoiceName
             name_clean = re.sub(r'\s*[-–—]\s*No\.?\s*[A-Z0-9]+$', '', name, flags=re.I).strip()
             if name_clean:
+                # Clean pipe-table formatting: "| THE SELLER: | PROFORMA INVOICE |" → "PROFORMA INVOICE"
+                if '|' in name_clean:
+                    _pipe_cells = [c.strip() for c in name_clean.split('|') if c.strip()]
+                    _inv_keywords = ['INVOICE', 'HÓA ĐƠN', 'PHIẾU', 'VAT INVOICE']
+                    for _pc in _pipe_cells:
+                        if any(kw in _pc.upper() for kw in _inv_keywords):
+                            name_clean = _pc.strip()
+                            break
                 if not invoice.invoiceName:
                     invoice.invoiceName = name_clean
                 elif "GIÁ TRỊ" in up and "GIÁ TRỊ" not in invoice.invoiceName.upper():
@@ -1066,6 +1074,10 @@ def parse_seller(lines: List[str], invoice: Invoice):
                     elif value:
                         if not invoice.sellerName:
                             pending_field = field
+                    else:
+                        # Empty value after colon (e.g., "Exporter:") → name on next line
+                        if not invoice.sellerName:
+                            pending_field = field
                     matched = True
                     break
 
@@ -1128,6 +1140,11 @@ def parse_seller(lines: List[str], invoice: Invoice):
                             # Not a phone number — skip and keep pending
                             continue
                     setattr(invoice, pending_field, clean)
+                    # After setting sellerName via continuation, expect address next
+                    if pending_field == "sellerName":
+                        pending_field = "sellerAddress"
+                        matched = True
+                        continue
                 # For address fields, keep pending_field to allow multi-line address
                 if not matched and "Address" not in pending_field:
                     pending_field = None
@@ -2268,20 +2285,27 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
         # If no signal found → leave currency as None (do not force VND)
     
     # ===== INVOICE ID =====
-    print(f"DEBUG: Checking InvoiceID. Current val: '{invoice.invoiceID}'")
+    if not invoice.invoiceID:
+        # Change 2: Global fallback for Vietnamese GTGT "Số:" pattern (before other patterns)
+        _m_so = re.search(r'(?:^|\\n|\n)\s*Số\s*(?:\([^)]*\))?\s*[:：]\s*\*{0,2}(\d{3,})\*{0,2}', raw_text, re.I)
+        if _m_so:
+            # Verify not preceded by address context
+            _before_so = raw_text[max(0, _m_so.start()-60):_m_so.start()]
+            if not re.search(r'(?:địa chỉ|address|add\.|tài khoản)', _before_so, re.I):
+                invoice.invoiceID = _m_so.group(1)
     if not invoice.invoiceID:
         # Pattern 0: BIÊN BẢN HỦY HÓA ĐƠN format - "Hóa đơn bị hủy: ... số 00000324"
         m = re.search(r'(?:hóa đơn bị hủy|hoá đơn bị huỷ)[^,\n]*,\s*(?:ký hiệu\s+)?[^,]+,\s*số\s+(\d{5,})', raw_text, re.I)
         if m:
             invoice.invoiceID = m.group(1)
-            print(f"DEBUG: Found InvoiceID via BIÊN BẢN HỦY format: '{m.group(1)}'")
+            # print(f"DEBUG: Found InvoiceID via BIÊN BẢN HỦY format: '{m.group(1)}'")
         
         # Pattern 0.5: COMMERCIAL INVOICE - No20250321003 or INVOICE - No.12345
         if not invoice.invoiceID:
             m = re.search(r'INVOICE\s*[-–—]\s*No\.?\s*([A-Z0-9]+)', raw_text, re.I)
             if m:
                 invoice.invoiceID = m.group(1)
-                print(f"DEBUG: Found InvoiceID via COMMERCIAL INVOICE format: '{m.group(1)}'")
+                # print(f"DEBUG: Found InvoiceID via COMMERCIAL INVOICE format: '{m.group(1)}'")
         
         # Pattern 1: Explicit line start "Số: 3" or similar (but NOT "Số biên bản")
         # Must NOT be preceded by colon/comma (to avoid "Địa chỉ: Số 10, ngách...")
@@ -2298,7 +2322,7 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
                 _is_address_after = any(ak in _after_match for ak in _addr_kws_after)
                 if not re.search(r'(?:địa chỉ|address|add\.)', _before_match, re.I) and not _is_address_after:
                     val = m.group(1).lstrip('0') or m.group(1)
-                    print(f"DEBUG: Found InvoiceID via Regex 1 (Simple): '{val}'")
+                    # print(f"DEBUG: Found InvoiceID via Regex 1 (Simple): '{val}'")
                     invoice.invoiceID = val
             else:
                 # Pattern 2: Old complex pattern fallback (but NOT "Số biên bản")
@@ -2357,7 +2381,7 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
                 invoice.invoiceSerial = m.group(1)
             if m.group(2):
                 invoice.invoiceFormNo = m.group(2)
-                print(f"DEBUG: Found FormNo via BIÊN BẢN HỦY format: Serial='{m.group(1)}', FormNo='{m.group(2)}'")
+                # print(f"DEBUG: Found FormNo via BIÊN BẢN HỦY format: Serial='{m.group(1)}', FormNo='{m.group(2)}'")
         
         # Pattern 0b: Direct "Mẫu số:" extraction (may be outside header block)
         if not invoice.invoiceFormNo:
@@ -3549,10 +3573,14 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
             addr_val = m.group(2).strip() if m.lastindex >= 2 else m.group(m.lastindex).strip()
             # Reject separator-looking values (all dashes)
             if addr_val and len(addr_val) > 5 and not re.fullmatch(r'[-\s|]+', addr_val):
-                # Also update sellerName if not set yet and group 1 has a plausible company name
+                # Also update sellerName if not set yet OR if it wrongly equals the invoice name
                 if m.lastindex >= 2:
                     name_cand = m.group(1).strip()
-                    if name_cand and len(name_cand) > 3 and not invoice.sellerName:
+                    _seller_is_invoice_name = (
+                        invoice.sellerName and invoice.invoiceName and
+                        invoice.sellerName.strip().upper() == invoice.invoiceName.strip().upper()
+                    )
+                    if name_cand and len(name_cand) > 3 and (not invoice.sellerName or _seller_is_invoice_name):
                         invoice.sellerName = name_cand
                 invoice.sellerAddress = addr_val
     
@@ -3595,6 +3623,37 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
                             and not _invoice_label_re.search(val)
                             and not _country_origin_re.match(val)):
                         invoice.buyerName = val
+                    else:
+                        # Value was rejected (e.g. "INV. NO.:") — look at next pipe-table rows
+                        # Pattern: | THE BUYER: | INV. NO.: | ... |\n| BuyerName | | |\n| Address | | |
+                        _after_buyer = clean_text[m.end():]
+                        _buyer_rows_name = None
+                        _buyer_rows_addr = []
+                        for _brow in _after_buyer.split('\n')[:6]:
+                            _brow = _brow.strip()
+                            if not _brow or set(_brow).issubset({'|', '-', ' ', ':', '+'}):
+                                continue
+                            if not _brow.startswith('|'):
+                                break
+                            _bcells = [c.strip() for c in _brow.split('|') if c.strip()]
+                            if _bcells:
+                                _first = _bcells[0].strip()
+                                _fl = _first.lower()
+                                # Stop at section boundaries
+                                if any(k in _fl for k in ['description', 'total', 'qty', 'amount',
+                                                           'unit price', 'h.s. code', 'item']):
+                                    break
+                                # Skip label-only cells
+                                if _invoice_label_re.search(_first):
+                                    continue
+                                if not _buyer_rows_name:
+                                    _buyer_rows_name = _first
+                                else:
+                                    _buyer_rows_addr.append(_first)
+                        if _buyer_rows_name and _buyer_rows_name.lower().strip() not in _buyer_skip:
+                            invoice.buyerName = _buyer_rows_name
+                            if _buyer_rows_addr and not invoice.buyerAddress:
+                                invoice.buyerAddress = ', '.join(_buyer_rows_addr)
                 else:
                     name, addr = _extract_after_label(clean_text, pat)
                     if name and len(name) > 2:
@@ -4401,6 +4460,21 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
         if _pipe_items:
             invoice.itemList = _pipe_items
 
+    # Change 4: invoiceName fallback — if still missing after block parsing
+    if not invoice.invoiceName:
+        _m_invname = re.search(r'(?:HÓA ĐƠN\s+GIÁ TRỊ GIA TĂNG|HÓA ĐƠN\s+BÁN HÀNG)', raw_text, re.I)
+        if _m_invname:
+            invoice.invoiceName = _m_invname.group(0).strip()
+        else:
+            _m_invname_en = re.search(r'(?:COMMERCIAL\s+INVOICE|PROFORMA\s+INVOICE|PRO\s+FORMA\s+INVOICE|TAX\s+INVOICE)', raw_text, re.I)
+            if _m_invname_en:
+                invoice.invoiceName = _m_invname_en.group(0).strip()
+            else:
+                # Standalone "INVOICE" (only if no other prefix match)
+                _m_inv_standalone = re.search(r'(?:^|\n)\s*#*\s*(INVOICE)\s*(?:\n|$)', raw_text, re.I)
+                if _m_inv_standalone:
+                    invoice.invoiceName = _m_inv_standalone.group(1).strip()
+
     # Fallback: scan toàn bộ raw text cho các trường còn thiếu
     parse_global_fields(raw_text, invoice)
     
@@ -4978,13 +5052,14 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
             invoice.invoiceTotalInWord = None
 
     # ===== Fallback: derive tax fields from item-level data when total block is empty =====
-    # Case 171: all financial data (preTaxPrice, taxPercent, taxAmount) is in the table,
-    # not in a separate total section. Derive from items when missing.
-    if invoice.itemList and len(invoice.itemList) == 1:
-        item = invoice.itemList[0]
-        # Derive preTaxPrice from item amount
-        if not invoice.preTaxPrice and item.amount:
-            invoice.preTaxPrice = item.amount
+    # Change 1: Extended to multi-item cases (was single-item only).
+    # Handles GTGT template invoices where tax data is only in the item table.
+    if invoice.itemList:
+        # Derive preTaxPrice from sum of item amounts
+        if not invoice.preTaxPrice:
+            _item_sum = sum(it.amount or 0 for it in invoice.itemList)
+            if _item_sum > 0:
+                invoice.preTaxPrice = _item_sum
         # Derive taxAmount from totalAmount - preTaxPrice
         if not invoice.taxAmount and invoice.totalAmount and invoice.preTaxPrice:
             _tax_calc = invoice.totalAmount - invoice.preTaxPrice
@@ -4996,5 +5071,15 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
             _tax_pct_m = re.search(r'(?<!\d)(\d{1,2})%', _raw_before_zoom)
             if _tax_pct_m:
                 invoice.taxPercent = _tax_pct_m.group(1) + '%'
+
+    # Change 5: Derive taxPercent from taxAmount/preTaxPrice when both are available
+    if not invoice.taxPercent and invoice.taxAmount and invoice.preTaxPrice and invoice.preTaxPrice > 0:
+        _calc_pct = round(invoice.taxAmount / invoice.preTaxPrice * 100)
+        if _calc_pct in (1, 2, 3, 5, 8, 10, 15, 20):  # Common VAT rates worldwide
+            invoice.taxPercent = f"{_calc_pct}%"
+
+    # Change 3: For commercial invoices with no tax info, preTaxPrice = totalAmount
+    if not invoice.preTaxPrice and invoice.totalAmount and not invoice.taxAmount:
+        invoice.preTaxPrice = invoice.totalAmount
 
     return invoice

@@ -289,9 +289,9 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
                             header_map[logical_idx2] = 'amount'
                     logical_idx2 += 1
             
-            print(f"DEBUG TABLE PARSER: Header detected at line {i}")
-            print(f"  Columns: {cols}")
-            print(f"  Header map: {header_map}")
+            # print(f"DEBUG TABLE PARSER: Header detected at line {i}")
+            # print(f"  Columns: {cols}")
+            # print(f"  Header map: {header_map}")
             break
             
     # If no header found, assume standard layout if enough columns
@@ -303,7 +303,7 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
     # POST-PROCESS: If column 0 is unmapped and no 'name' exists, infer col 0 as 'name'
     if header_map and 'name' not in header_map.values() and 0 not in header_map:
         header_map[0] = 'name'
-        print(f"  Inferred col 0 as name: {header_map}")
+        # print(f"  Inferred col 0 as name: {header_map}")
     
     # FIX: Detect header-data column misalignment
     # When header has N cols but data rows consistently have N+1 cols,
@@ -333,7 +333,7 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
                     shifted = {k + 1: v for k, v in header_map.items()}
                     shifted[0] = 'name'
                     header_map = shifted
-                    print(f"  Header shifted: {header_map}")
+                    # print(f"  Header shifted: {header_map}")
 
     # 2. Parse data rows
     for line in lines[data_start_idx:]:
