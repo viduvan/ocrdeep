@@ -68,7 +68,10 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
             "shipper (name",
             "shipper:",
             "shipper/exporter",
-        ]) or low == "shipper" or low.startswith("shipper "):
+            "exporter/shipper",
+            "shipper (name and address",
+            "ship from",
+        ]) or low == "shipper" or (low.startswith("shipper ") and "receipt" not in low and "load" not in low and "seal" not in low and "pack" not in low and "declared" not in low):
             current = "shipper"
 
         # ===== CONSIGNEE =====
@@ -78,13 +81,18 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
             "consignee:",
             "consignee/importer",
             "consignee (if to order",
-        ]) or low == "consignee" or low.startswith("consignee "):
+            "consignee (not negotiable",
+            "consignee (non-negotiable",
+            "ship to",
+        ]) or low == "consignee" or (low.startswith("consignee ") and "reference" not in low):
             current = "consignee"
 
         # ===== NOTIFY PARTY =====
         elif any(k in low for k in [
             "notify party",
+            "notify address",
             "notify:",
+            "also notify",
         ]):
             current = "notify_party"
 
@@ -92,6 +100,7 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
         elif any(k in low for k in [
             "pre-carriage by",
             "pre-contract by",
+            "pre-carrier",
             "ocean vessel",
             "port of loading",
             "port of discharge",
@@ -99,6 +108,9 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
             "place of delivery",
             "final destination",
             "type of movement",
+            "vessel and voyage",
+            "vessel/voyage",
+            "vessel(s)",
         ]):
             current = "shipping"
 
@@ -154,6 +166,8 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
             "b/l no",
             "b/l number",
             "bl no",
+            "b/l-no",
+            "b/l nr",
         ]):
             current = "header"
 
@@ -625,12 +639,24 @@ def parse_bol_block_based(raw_text: str) -> BillOfLading:
     parse_freight(blocks["freight"], bol)
 
     # === Cross-block fallback extraction ===
-    # B/L Number: scan ALL lines if not found in header
+
+    # B/L Number: scan ALL lines with multiple patterns
     if not bol.blNumber:
+        bl_patterns = [
+            r'B/L\s*No\.?\s*[:\s]*([A-Z0-9]{5,})',
+            r'B/L\s*Number\s*[:\s]*([A-Z0-9]{5,})',
+            r'B/L[\s-]*NR\.?\s*[:\s]*([A-Z0-9]{5,})',
+            r'BL\s*(?:No|Number)\.?\s*[:\s]*([A-Z0-9]{5,})',
+            r'Bill[/\s]*Lading\s*Number\s*[:\s]*([A-Z0-9]{5,})',
+            r'BILL\s+OF\s+LADING\s+NO\.?\s*[:\s]*([A-Z0-9]{5,})',
+        ]
         for line in lines:
-            bl_m = re.search(r'B/L\s*No\.?\s*[:\s]*([A-Z0-9]+)', line, re.I)
-            if bl_m:
-                bol.blNumber = bl_m.group(1).strip()
+            for pat in bl_patterns:
+                bl_m = re.search(pat, line, re.I)
+                if bl_m:
+                    bol.blNumber = bl_m.group(1).strip()
+                    break
+            if bol.blNumber:
                 break
 
     # Carrier: scan for company name before "BILL OF LADING"
@@ -650,7 +676,7 @@ def parse_bol_block_based(raw_text: str) -> BillOfLading:
         agent_parts = []
         for line in lines:
             low = line.lower().strip()
-            if "for delivery" in low or "please apply to" in low:
+            if "for delivery" in low or "please apply to" in low or "for cargo delivery" in low:
                 in_delivery = True
                 if ":" in line:
                     val = line.strip().split(":", 1)[-1].strip()
@@ -661,28 +687,167 @@ def parse_bol_block_based(raw_text: str) -> BillOfLading:
                 clean = line.strip()
                 if len(clean) < 2 or any(k in low for k in [
                     "shipper", "consignee", "notify", "pre-carriage",
-                    "ocean vessel", "port of", "marks", "container"
+                    "ocean vessel", "port of", "marks", "container",
+                    "bill of lading", "received", "witness",
                 ]):
                     break
                 agent_parts.append(clean)
         if agent_parts:
             bol.deliveryAgent = ", ".join(agent_parts[:4])  # Limit to 4 lines
 
-    # Vessel / Voyage: scan pipe tables and key-value lines
+    # Vessel / Voyage: scan label:value and known patterns
     if not bol.vesselVoyage:
+        vessel_patterns = [
+            r'(?:Vessel|Ocean\s+Vessel)[/\s]*(?:Voy(?:age)?\.?\s*(?:No\.?)?)?[\s:]+([A-Z][A-Z\s]+\d{3,}[A-Z]*(?:/\s*\d+[A-Z]*)?)',
+            r'(?:CA|MV|MT|MS|SS)\s+[A-Z]+\s+\d{3,}[A-Z]*',
+            r'Vessel\s*(?:and\s*)?(?:Voyage\s*)?(?:Number|No\.?)?\s*[:\s]+(.+)',
+        ]
         for line in lines:
-            m = re.search(r'(?:CA|MV|MT|MS|SS)\s+[A-Z]+\s+\d{3,}[A-Z]*', line)
-            if m:
-                bol.vesselVoyage = m.group(0).strip()
+            for pat in vessel_patterns:
+                m = re.search(pat, line, re.I)
+                if m:
+                    val = (m.group(1) if m.lastindex else m.group(0)).strip()
+                    # Skip if value is just a section label
+                    if len(val) > 3 and not any(k in val.lower() for k in ["port", "loading", "discharge"]):
+                        bol.vesselVoyage = val
+                        break
+            if bol.vesselVoyage:
                 break
 
-    # Port of Loading from pipe tables
+    # Port of Loading: scan label:value lines
     if not bol.portOfLoading:
         for line in lines:
-            if "nansha" in line.lower() or "port" in line.lower():
-                port_m = re.search(r'(NANSHA\s+PORT[^|]*|SHANGHAI\s+PORT[^|]*|SHENZHEN\s+PORT[^|]*)', line, re.I)
-                if port_m:
-                    bol.portOfLoading = port_m.group(1).strip().rstrip(",").strip()
+            m = re.search(r'Port\s+of\s+Loading[.:\s]+(.+?)(?:\||$)', line, re.I)
+            if m:
+                val = m.group(1).strip().rstrip(",").strip()
+                if val and len(val) > 2 and not any(k in val.lower() for k in ["port of discharge", "place of"]):
+                    bol.portOfLoading = val
                     break
+            # Also try named ports
+            port_m = re.search(r'(NANSHA\s+PORT[^|]*|SHANGHAI\s+PORT[^|]*|SHENZHEN\s+PORT[^|]*|QINGDAO\s+PORT[^|]*)', line, re.I)
+            if port_m and not bol.portOfLoading:
+                bol.portOfLoading = port_m.group(1).strip().rstrip(",").strip()
+                break
+
+    # Port of Discharge: scan label:value lines
+    if not bol.portOfDischarge:
+        for line in lines:
+            m = re.search(r'Port\s+of\s+Discharge[.:\s]+(.+?)(?:\||$)', line, re.I)
+            if m:
+                val = m.group(1).strip().rstrip(",").strip()
+                if val and len(val) > 2 and not any(k in val.lower() for k in ["place of delivery", "port of loading"]):
+                    bol.portOfDischarge = val
+                    break
+
+    # Place of Receipt
+    if not bol.placeOfReceipt:
+        for line in lines:
+            m = re.search(r'Place\s+of\s+Receipt[.:\s]+(.+?)(?:\||$)', line, re.I)
+            if m:
+                val = m.group(1).strip().rstrip(",").strip()
+                if val and len(val) > 2 and "ocean vessel" not in val.lower() and "port of" not in val.lower():
+                    bol.placeOfReceipt = val
+                    break
+
+    # Place of Delivery
+    if not bol.placeOfDelivery:
+        for line in lines:
+            m = re.search(r'Place\s+of\s+Delivery[.:\s]+(.+?)(?:\||$)', line, re.I)
+            if m:
+                val = m.group(1).strip().rstrip(",").strip()
+                if val and len(val) > 2 and "port of" not in val.lower():
+                    bol.placeOfDelivery = val
+                    break
+
+    # Shipped on Board date: scan all lines
+    if not bol.shippedOnBoardDate:
+        for line in lines:
+            low = line.lower()
+            if "shipped on board" in low or "laden on board" in low or "loaded on" in low:
+                date_m = re.search(r'(\d{2}[A-Z]{3}\d{4}|\d{4}/\d{2}/\d{2}|\d{2}-\w{3}-\d{4}|\d{2}/\w{3}/\d{4})', line)
+                if date_m:
+                    bol.shippedOnBoardDate = date_m.group(1)
+                    break
+        # Also check the next line after "SHIPPED ON BOARD" / "LADEN ON BOARD" for date
+        if not bol.shippedOnBoardDate:
+            for i, line in enumerate(lines):
+                low = line.lower()
+                if "shipped on board" in low or "laden on board" in low or "loaded on" in low:
+                    # Check same line
+                    date_m = re.search(r'DATE[:\s]*(.+)', line, re.I)
+                    if date_m:
+                        dval = date_m.group(1).strip()
+                        date_m2 = re.search(r'(\w{3}[.\s]*\d{1,2}[,.\s]*\d{4}|\d{4}/\d{2}/\d{2}|\d{2}[A-Z]{3}\d{4})', dval)
+                        if date_m2:
+                            bol.shippedOnBoardDate = date_m2.group(1)
+                            break
+                    # Check next line for standalone date
+                    if i + 1 < len(lines):
+                        nxt = lines[i + 1].strip()
+                        date_m3 = re.search(r'^(\d{2}[A-Z]{3}\d{4}|\d{4}/\d{2}/\d{2}|\d{1,2}[\s-]\w{3}[\s-]\d{4})$', nxt)
+                        if date_m3:
+                            bol.shippedOnBoardDate = date_m3.group(1)
+                            break
+
+    # Seal No: scan all lines for seal patterns
+    if not bol.sealNo:
+        for line in lines:
+            seal_m = re.search(r'(?:SEAL|Seal)\s*(?:No\.?\s*)?[:\s]*([A-Z]?\d{5,})', line)
+            if seal_m:
+                bol.sealNo = seal_m.group(1).strip()
+                break
+
+    # Type of Movement: scan all lines for CY-CY, CFS-CFS, FCL/FCL patterns
+    if not bol.typeOfMovement:
+        for line in lines:
+            mov_m = re.search(r'\b(C[YF]S?\s*[-/]\s*C[YF]S?|FCL\s*[-/]\s*FCL|LCL\s*[-/]\s*LCL)\b', line, re.I)
+            if mov_m:
+                bol.typeOfMovement = mov_m.group(1).upper().replace(" ", "")
+                break
+
+    # Trade Term: fallback scan all lines
+    if not bol.tradeTerm:
+        for line in lines:
+            trade_m = re.search(r'\b(FOB|CIF|CFR|C\.?F\.?R|CIP|FCA|EXW|DAP|DDP)\b\s+[A-Z]', line)
+            if trade_m:
+                bol.tradeTerm = trade_m.group(1).upper().replace(".", "")
+                break
+
+    # Issue date: scan all for standalone date patterns if not found
+    if not bol.issueDate:
+        for line in lines:
+            low = line.lower()
+            if "date of issue" in low or "date of bill" in low or "issue date" in low:
+                dm = re.search(r'(\d{4}/\d{2}/\d{2}|\d{2}[A-Z]{3}\d{4}|\d{4}-\d{2}-\d{2}|\w+ \d{1,2},?\s*\d{4})', line)
+                if dm:
+                    bol.issueDate = dm.group(1).strip()
+                    break
+
+    # Issue place: scan
+    if not bol.issuePlace:
+        for line in lines:
+            m = re.search(r'Place\s+(?:and\s+date\s+)?of\s+Issue[:\s]+(.+?)(?:\||$)', line, re.I)
+            if m:
+                val = m.group(1).strip()
+                # Try to separate place from date
+                parts = re.split(r'\s+\d{2}[A-Z]{3}\d{4}|\s+\d{4}/\d{2}/\d{2}', val)
+                if parts and parts[0].strip() and len(parts[0].strip()) > 2:
+                    bol.issuePlace = parts[0].strip().rstrip(",").strip()
+                    break
+
+    # Number of originals
+    if not bol.numberOfOriginals:
+        for line in lines:
+            m = re.search(r'No\.?\s*of\s*(?:Original|original)\s*B.*?L[:\s]*(.+?)(?:\||$)', line, re.I)
+            if m:
+                val = m.group(1).strip()
+                if val and len(val) > 0:
+                    bol.numberOfOriginals = val
+                    break
+            # Also match "THREE (3)" after "Number & Sequence of Original Bill"
+            m2 = re.search(r'(?:Number|No\.?)\s*(?:\&|and)\s*Sequence\s+of\s+Original.*?:\s*(.+)', line, re.I)
+            if m2:
+                bol.numberOfOriginals = m2.group(1).strip()
+                break
 
     return bol
