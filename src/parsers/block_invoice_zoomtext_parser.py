@@ -93,7 +93,7 @@ def _detect_zoom_blocks(lines: List[str]):
             _section_kws = ['shipper', 'exporter', 'consignee', 'importer', 'buyer',
                             'seller', 'invoice', 'bill', 'ship to', 'details',
                             'commercial', 'proforma', 'summary',
-                            'hóa đơn', 'phiếu']
+                            'hóa đơn', 'hòa đơn', 'phiếu']
             if any(sk in _heading.lower() for sk in _section_kws):
                 continue  # Section label — skip
             # Skip pure numbers — they are invoice IDs (#123144), not company names
@@ -214,6 +214,7 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
         # EN labeled: "THE SELLER: <name>" or "Exporter: <name>" etc.
         if any(k in low for k in ["the seller:", "seller:", "shipper:", "beneficiary:",
                                    "đơn vị bán hàng:", "đơn vị bán:",
+                                   "người bán:",  # Case 171: "Người bán: Tan TinCay Partners"
                                    # EN Commercial Invoice
                                    "exporter:", "sender:", "sender name:",
                                    "ship from:", "bill from:", "billed from:",
@@ -554,6 +555,7 @@ def _parse_en_buyer(lines: List[str], invoice: Invoice) -> None:
 
         # EN: THE BUYER: / CONSIGNEE: / SOLD TO: etc.  (authoritative — always overwrite)
         if any(k in low for k in ["the buyer:", "buyer:", "consignee:", "bill to:", "billed to:",
+                                   "người mua:",  # Case 171: "Người mua: Phoenix Spring Advisory"
                                    # EN Commercial Invoice
                                    "sold to:", "ship to:", "importer:",
                                    "importer name", "consigned to:", "invoice to:",
@@ -919,16 +921,16 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
                 if m:
                     invoice.invoiceDate = f"{m.group(3).zfill(2)}/{m.group(2).zfill(2)}/{m.group(1)}"
 
-            # Pattern: Ngày: M/D/YYYY or Ngày: DD/MM/YYYY or Ngày lập: DD/MM/YYYY (VN short form)
+            # Pattern: Ngày: DD/MM/YYYY or Ngày lập: DD/MM/YYYY (VN short form)
             if not invoice.invoiceDate:
                 m = re.search(r"[Nn]gày(?:\s+lập)?[:\s]+(\d{1,2})/(\d{1,2})/(\d{4})", clean)
                 if m:
-                    # Ambiguous: treat as M/D/YYYY if month > 12 swap, else D/M
+                    # "Ngày" is Vietnamese → default to D/M/YYYY (Vietnamese standard)
                     p1, p2, yr = int(m.group(1)), int(m.group(2)), m.group(3)
-                    if p1 > 12:  # p1 is day, p2 is month
-                        invoice.invoiceDate = f"{str(p1).zfill(2)}/{str(p2).zfill(2)}/{yr}"
-                    else:        # treat as M/D/YYYY (US format common in EN invoices)
+                    if p2 > 12:  # p2 can't be month, so p1=month, p2=day
                         invoice.invoiceDate = f"{str(p2).zfill(2)}/{str(p1).zfill(2)}/{yr}"
+                    else:        # D/M/YYYY (Vietnamese standard)
+                        invoice.invoiceDate = f"{str(p1).zfill(2)}/{str(p2).zfill(2)}/{yr}"
 
             # Pattern: Ngày DD tháng MM năm YYYY (VN full, also handles 20...21... year)
             if not invoice.invoiceDate:

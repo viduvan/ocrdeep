@@ -21,6 +21,8 @@ def safe_parse_float(value: str) -> Optional[float]:
 
     # Strip common currency symbols before parsing
     v = v.lstrip('$€£¥₹₩฿₺₽₱﷼')
+    # Also strip currency code words: VND, USD, EUR, etc.
+    v = re.sub(r'^(?:VND|USD|EUR|GBP|JPY|CNY|KRW|THB|INR|AUD|CAD|SGD|HKD|MYR|IDR|PHP)\s*', '', v, flags=re.I).strip()
     if not v:
         return None
 
@@ -138,7 +140,7 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
         # tax_rate MUST come BEFORE price to avoid "Tax Rate" matching "rate" in price
         "tax_rate": ["thuế suất", "tax rate", "vat rate", "vat%", "tax (%)"],
         # tax_amt MUST come BEFORE amount to avoid "Tax Amount" matching "amount"
-        "tax_amt": ["tiền thuế", "tax amount", "vat amount"],
+        "tax_amt": ["tiền thuế", "thuế gtgt", "tax amount", "vat amount"],
         "price": ["đơn giá", "unit price", "单价", "unit value", "rate",
                   "unit cost", "u.price", "price",
                   "unit (usd)", "unit (eur)", "unit (gbp)", "unit ($)", "unit (€)", "unit (£)",
@@ -151,7 +153,7 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
         "qty": ["số lượng", "sl", "quantity", "qty", "数量", "no.of unit", "no. of unit",
                 "hrs/qty", "pcs"],
         "unit": ["đvt", "đơn vị", "unit of measure", "unit"],
-        "payment": ["thành tiền sau thuế", "cộng tiền thanh toán", "tổng cộng"],
+        "payment": ["thành tiền sau thuế", "tổng tiền sau thuế", "cộng tiền thanh toán", "tổng cộng"],
         "currency_col": ["currency", "货号"],
         "discount": ["discounts", "discount", "chiết khấu", "giảm giá"],
     }
