@@ -1,11 +1,74 @@
 # src/file_handler.py
-# Handles loading and preprocessing of images and PDF files for OCR.
+# Handles loading and preprocessing of images, PDF and Word files for OCR.
 
 import io
+import os
+import subprocess
 import fitz # PyMuPDF
 from PIL import Image # Pillow
 import pillow_heif # Handle HEIC images
 from src import config
+
+
+# ---- File type helpers ----
+
+def is_pdf(filepath: str) -> bool:
+    return filepath.lower().endswith(".pdf")
+
+def is_word(filepath: str) -> bool:
+    return filepath.lower().endswith((".doc", ".docx"))
+
+SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".pdf", ".doc", ".docx")
+
+
+def convert_docx_to_pdf(docx_path: str) -> str:
+    """
+    Convert a DOCX/DOC file to PDF using LibreOffice headless.
+    Returns the path to the generated PDF file.
+    Raises RuntimeError if conversion fails.
+    """
+    output_dir = os.path.dirname(docx_path) or "."
+    # Use isolated user profile to prevent lock conflicts
+    user_profile = f"file://{output_dir}/lo_profile_{os.getpid()}"
+    try:
+        result = subprocess.run(
+            [
+                'libreoffice', '--headless', '--norestore', '--nolockcheck',
+                f'-env:UserInstallation={user_profile}',
+                '--convert-to', 'pdf',
+                '--outdir', output_dir,
+                docx_path,
+            ],
+            check=True,
+            timeout=120,
+            capture_output=True,
+            text=True,
+        )
+        print(f"LibreOffice conversion output: {result.stdout.strip()}")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"LibreOffice conversion timed out for {docx_path}")
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"LibreOffice conversion failed: {e.stderr}")
+    except FileNotFoundError:
+        raise RuntimeError(
+            "LibreOffice not found. Install with: apt-get install libreoffice-writer"
+        )
+    finally:
+        # Cleanup temporary user profile
+        import shutil
+        profile_dir = os.path.join(output_dir, f"lo_profile_{os.getpid()}")
+        if os.path.isdir(profile_dir):
+            shutil.rmtree(profile_dir, ignore_errors=True)
+
+    # Output PDF has the same basename but .pdf extension
+    pdf_path = os.path.splitext(docx_path)[0] + ".pdf"
+    if not os.path.exists(pdf_path):
+        raise RuntimeError(
+            f"PDF was not created at {pdf_path}. "
+            f"LibreOffice output: {result.stdout}"
+        )
+    print(f"Converted {os.path.basename(docx_path)} -> {os.path.basename(pdf_path)}")
+    return pdf_path
 
 # Register HEIC opener
 pillow_heif.register_heif_opener()
@@ -91,7 +154,7 @@ def get_header_crop_bytes(filepath: str, ratio: float = 0.33) -> bytes:
     Useful for 'Zoom-in' OCR pass.
     """
     try:
-        if filepath.lower().endswith(".pdf"):
+        if is_pdf(filepath):
             # Render page 0 at high DPI
             doc = fitz.open(filepath)
             page = doc.load_page(0)
@@ -136,7 +199,7 @@ def get_header_right_crop_bytes(filepath: str, page_index: int = 0,
     Returns PNG bytes of the cropped region.
     """
     try:
-        if filepath.lower().endswith(".pdf"):
+        if is_pdf(filepath):
             doc = fitz.open(filepath)
             if page_index >= len(doc):
                 doc.close()
@@ -178,7 +241,7 @@ def get_header_crop_bytes_page(filepath: str, page_index: int, ratio: float = 0.
     For multi-page PDF zoom-in OCR pass.
     """
     try:
-        if not filepath.lower().endswith(".pdf"):
+        if not is_pdf(filepath):
             # For images, just delegate to the regular function
             return get_header_crop_bytes(filepath, ratio)
         
@@ -217,7 +280,7 @@ def get_bol_crop_bytes_page(filepath: str, page_index: int, ratio: float = 0.45)
     For B/L zoom-in OCR pass.
     """
     try:
-        if not filepath.lower().endswith(".pdf"):
+        if not is_pdf(filepath):
             # For images, delegate to the regular header crop function
             return get_header_crop_bytes(filepath, ratio)
         

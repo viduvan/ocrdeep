@@ -89,8 +89,12 @@ def run_vision_ocr(
 
     prompt = config.PROMPTS.get(ocr_mode, config.PROMPTS["plain"])
     
+    # Auto-convert Word files to PDF
+    if file_handler.is_word(file_path):
+        file_path = file_handler.convert_docx_to_pdf(file_path)
+    
     # Determine total pages in PDF
-    if file_path.lower().endswith(".pdf"):
+    if file_handler.is_pdf(file_path):
         total_page_count = file_handler.get_pdf_page_count(file_path)
         if total_page_count == 0:
             return {"raw_text": "", "duration_sec": 0, "ocr_mode": ocr_mode, "error": "Failed to read PDF"}
@@ -138,7 +142,7 @@ def run_vision_ocr(
 
     for page_idx in page_indices:
         # Get image bytes for this page
-        if file_path.lower().endswith(".pdf"):
+        if file_handler.is_pdf(file_path):
             image_bytes = file_handler.extract_pdf_page_bytes(file_path, page_idx)
         else:
             image_bytes = file_handler.get_image_bytes(file_path)
@@ -221,14 +225,14 @@ async def detect_single_invoice_ocr(
     per_file_timeout: int = Form(config.OCR_TIMEOUT_SECONDS),
 ):
     """
-    OCR a single invoice file (PNG, JPG, JPEG, PDF).
+    OCR a single invoice file (PNG, JPG, JPEG, PDF, DOC, DOCX).
     Returns parsed invoice data.
     """
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file uploaded")
     
-    if not file.filename.lower().endswith((".png", ".jpg", ".jpeg", ".pdf")):
-        raise HTTPException(status_code=400, detail="Unsupported file type. Use PNG, JPG, JPEG, or PDF.")
+    if not file.filename.lower().endswith(file_handler.SUPPORTED_EXTENSIONS):
+        raise HTTPException(status_code=400, detail="Unsupported file type. Use PNG, JPG, JPEG, PDF, DOC, or DOCX.")
     
     session_id = str(uuid.uuid4())
     temp_dir = Path("temp_ocr") / session_id
@@ -523,7 +527,7 @@ async def detect_invoice_ocr(
         if not file.filename:
             continue
             
-        if not file.filename.lower().endswith((".png", ".jpg", ".jpeg", ".pdf")):
+        if not file.filename.lower().endswith(file_handler.SUPPORTED_EXTENSIONS):
             # Skip unsupported files but continue with others
             all_results.append({
                 "filename": file.filename,
@@ -1116,7 +1120,7 @@ async def detect_bill_of_lading_ocr(
     per_file_timeout: int = Form(config.OCR_TIMEOUT_SECONDS),
 ):
     """
-    OCR a single Bill of Lading (B/L) document (PNG, JPG, JPEG, PDF).
+    OCR a single Bill of Lading (B/L) document (PNG, JPG, JPEG, PDF, DOC, DOCX).
     Returns parsed B/L data with shipper, consignee, cargo details.
     Uses 45% header crop for zoom-in OCR pass.
     """
@@ -1127,8 +1131,8 @@ async def detect_bill_of_lading_ocr(
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file uploaded")
 
-    if not file.filename.lower().endswith((".png", ".jpg", ".jpeg", ".pdf")):
-        raise HTTPException(status_code=400, detail="Unsupported file type. Use PNG, JPG, JPEG, or PDF.")
+    if not file.filename.lower().endswith(file_handler.SUPPORTED_EXTENSIONS):
+        raise HTTPException(status_code=400, detail="Unsupported file type. Use PNG, JPG, JPEG, PDF, DOC, or DOCX.")
 
     session_id = str(uuid.uuid4())
     temp_dir = Path("temp_ocr") / session_id

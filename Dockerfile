@@ -30,9 +30,10 @@ ENV PYTHONUNBUFFERED=1 \
 # Set working directory
 WORKDIR /app
 
-# Install runtime dependencies
+# Install runtime dependencies (libreoffice-writer for DOCX->PDF conversion)
 RUN apt-get update && apt-get install -y \
     curl \
+    libreoffice-writer \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python dependencies from builder

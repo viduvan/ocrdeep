@@ -11,3 +11,4 @@ uvicorn
 python-multipart
 beautifulsoup4
 lxml
+python-docx
