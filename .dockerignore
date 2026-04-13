@@ -33,7 +33,7 @@ test/
 .dockerignore
 
 # Misc
-README*.md
+
 *.sh
 load_test.py
 generate_test_cases.py
