@@ -11,10 +11,7 @@ Data.xlsx
 # ===========================
 # Test Files & Directories
 # ===========================
-/test/
-/tests/
-test_block_parser.py
-generate_test_cases.py
+
 
 # ===========================
 # Python
