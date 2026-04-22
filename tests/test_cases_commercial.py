@@ -71,11 +71,12 @@ def print_result(case_id, filename, d):
         print(f"\n  \U0001f4e6 itemList: {item_count} items")
         for i, item in enumerate(items[:5]):
             name = (item.get('productName') or '-')[:40]
+            code = item.get('productCode') or '-'
             unit = item.get('unit') or '-'
             qty = item.get('quantity', '-')
             price = item.get('unitPrice', '-')
             amt = item.get('amount', '-')
-            print(f"    [{i+1}] {name} | unit={unit} | qty={qty} | price={price} | amt={amt}")
+            print(f"    [{i+1}] {name} | code={code} | unit={unit} | qty={qty} | price={price} | amt={amt}")
         if item_count > 5:
             print(f"    ... +{item_count - 5} more")
     else:
