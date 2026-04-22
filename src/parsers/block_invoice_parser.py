@@ -629,8 +629,20 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
                         seen_table = True
                     # else: stay in current buyer/seller mode
                 else:
-                    current = "table"
-                    seen_table = True
+                    # Before defaulting to table, check if this pipe row contains
+                    # seller/buyer keywords (e.g. L/C-style numbered-label tables)
+                    _pipe_seller_kws = ["beneficiary", "exporter", "seller", "shipper",
+                                        "người bán", "đơn vị bán"]
+                    _pipe_buyer_kws = ["applicant", "importer", "buyer", "consignee",
+                                       "người mua", "đơn vị mua"]
+                    if any(k in l for k in _pipe_seller_kws):
+                        current = "seller"
+                    elif any(k in l for k in _pipe_buyer_kws):
+                        current = "buyer"
+                        seen_buyer = True
+                    else:
+                        current = "table"
+                        seen_table = True
 
         # ===== SIGNATURE (CHỈ CUỐI) =====
         elif seen_table and any(k in l for k in [
@@ -905,6 +917,7 @@ def parse_header(block: List[str], invoice: Invoice):
 def parse_seller(lines: List[str], invoice: Invoice):
     pending_field = None
     first_line_checked = False
+    _prev_line = ''
 
     for line in lines:
         clean = line.strip().replace("**", "")
@@ -1182,7 +1195,10 @@ def parse_seller(lines: List[str], invoice: Invoice):
             # EXCLUDE international phone numbers like 86-18929233070 (country_code-number)
             elif re.fullmatch(r"[\d\.\-]{10,20}", clean) and not invoice.sellerBankAccountNumber:
                 # Check if it looks like an intl phone: 1-2 digit country code + hyphen + 9-11 digits
-                if not re.fullmatch(r"\d{1,3}-\d{9,11}", clean):
+                # Also check if previous line is L/C-related (not a bank account)
+                _prev_low_ctx = _prev_line.lower().strip('*').strip() if _prev_line else ''
+                _is_lc_ctx = any(k in _prev_low_ctx for k in ['l/c', 'credit', 'lc number', 'lc no'])
+                if not re.fullmatch(r"\d{1,3}-\d{9,11}", clean) and not _is_lc_ctx:
                     invoice.sellerBankAccountNumber = clean.replace(".", "")
             # Bank name without label
             elif "ngân hàng" in low and not invoice.sellerBank:
@@ -1192,10 +1208,13 @@ def parse_seller(lines: List[str], invoice: Invoice):
                     invoice.sellerBank = m.group(1).strip()
                 else:
                     invoice.sellerBank = clean
+        
+        _prev_line = line
 
 
 def parse_buyer(block: List[str], invoice: Invoice):
     pending_field = None  # Track which field expects continuation on next line
+    _prev_line = ''
     
     for line in block:
         clean = line.strip().replace("**", "")
@@ -1476,11 +1495,15 @@ def parse_buyer(block: List[str], invoice: Invoice):
                     invoice.buyerPhoneNumber = clean
 
             # Bank Account
+            # EXCLUDE L/C numbers: check if previous line has 'l/c', 'credit', etc.
             elif re.fullmatch(r"[\d\.\-]{9,20}", clean):
-                if not invoice.sellerBankAccountNumber:
-                    invoice.sellerBankAccountNumber = clean.replace(".", "")
-                elif not invoice.buyerBankAccountNumber:
-                    invoice.buyerBankAccountNumber = clean.replace(".", "")
+                _prev_low_buyer = _prev_line.lower().strip('*').strip() if _prev_line else ''
+                _is_lc_buyer = any(k in _prev_low_buyer for k in ['l/c', 'credit', 'lc number', 'lc no'])
+                if not _is_lc_buyer:
+                    if not invoice.sellerBankAccountNumber:
+                        invoice.sellerBankAccountNumber = clean.replace(".", "")
+                    elif not invoice.buyerBankAccountNumber:
+                        invoice.buyerBankAccountNumber = clean.replace(".", "")
             
             # Bank Name detection (heuristic)
             elif "ngân hàng" in low:
@@ -1493,6 +1516,8 @@ def parse_buyer(block: List[str], invoice: Invoice):
                     invoice.sellerBank = bank_val
                 elif not invoice.buyerBank:
                     invoice.buyerBank = bank_val
+
+        _prev_line = line
 
 
 def parse_table(block: List[str], invoice: Invoice):
@@ -2377,6 +2402,23 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
             if m:
                 invoice.invoiceID = m.group(1)
     
+    # ===== STANDALONE No: AND DATE: PATTERNS (non-pipe lines) =====
+    # Only for English commercial invoices to avoid conflict with VN "Số (No.):" format
+    if not invoice.invoiceID and _is_en_invoice(raw_text):
+        _clean_for_no = re.sub(r'\*\*([^*]+)\*\*', r'\1', raw_text)
+        m_no = re.search(r'(?:^|\n)\s*No\.?\s*:\s*([A-Z0-9][A-Za-z0-9\-/]{2,})', _clean_for_no)
+        if m_no:
+            invoice.invoiceID = m_no.group(1).strip()
+    if not invoice.invoiceDate and _is_en_invoice(raw_text):
+        _clean_for_date = re.sub(r'\*\*([^*]+)\*\*', r'\1', raw_text)
+        m_date = re.search(r'(?:^|\n)\s*DATE\s*:\s*([A-Z]{3,9})\s+(\d{1,2}),?\s+(\d{4})', _clean_for_date, re.I)
+        if m_date:
+            _months = {'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 'may': '05', 'jun': '06',
+                       'jul': '07', 'aug': '08', 'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'}
+            _mabbr = m_date.group(1).lower()[:3]
+            if _mabbr in _months:
+                invoice.invoiceDate = f"{m_date.group(2).zfill(2)}/{_months[_mabbr]}/{m_date.group(3)}"
+
     # ===== INVOICE FORM NO (Ký hiệu / Serial) =====
     if not invoice.invoiceFormNo:
         # Pattern 0: BIÊN BẢN HỦY HÓA ĐƠN format - "Hóa đơn bị hủy: Mẫu số 1, ký hiệu C25THO"
@@ -3135,6 +3177,25 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
                 invoice.invoiceName = m.group(1).strip()
                 break
     
+    # ===== EARLY No: / DATE: EXTRACTION (standalone bold-label patterns) =====
+    # Handles: **No:** 096/NTB/2024 and **DATE:** AUG 11, 2024
+    # Note: clean_text already has **bold** markers stripped
+    if not invoice.invoiceID:
+        _m_no = re.search(r'(?:^|\n)\s*No\.?\s*:\s*([A-Z0-9][A-Za-z0-9\-/]{2,})', clean_text)
+        if _m_no:
+            _no_val = _m_no.group(1).strip()
+            # Reject pure-digit strings of 10+ chars (likely L/C or account numbers)
+            if not re.match(r'^\d{10,}$', _no_val):
+                invoice.invoiceID = _no_val
+    if not invoice.invoiceDate:
+        _m_date = re.search(r'(?:^|\n)\s*DATE\s*:\s*([A-Z]{3,9})\s+(\d{1,2}),?\s+(\d{4})', clean_text, re.I)
+        if _m_date:
+            _months_tmp = {'jan':'01','feb':'02','mar':'03','apr':'04','may':'05','jun':'06',
+                           'jul':'07','aug':'08','sep':'09','oct':'10','nov':'11','dec':'12'}
+            _mabbr = _m_date.group(1).lower()[:3]
+            if _mabbr in _months_tmp:
+                invoice.invoiceDate = f"{_m_date.group(2).zfill(2)}/{_months_tmp[_mabbr]}/{_m_date.group(3)}"
+    
     # ===== PIPE-TABLE HEADER: Vendor/Exporter | Invoice Number | Date of Shipment =====
     # This handles case 36-style pipe tables where seller, ID, and date are in columns
     _vendor_header_m = re.search(
@@ -3268,6 +3329,81 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
             if not invoice.sellerAddress and len(_seller_parts) > 1:
                 invoice.sellerAddress = ', '.join(_seller_parts[1:])
     
+    # ===== L/C-STYLE NUMBERED-LABEL PIPE-TABLE EXTRACTOR =====
+    # Handles commercial invoices with numbered pipe-table format:
+    # | 1. Beneficiary / Exporter / Seller. | 5. No. & Date of Invoice. |
+    # | ABC TRADING ... | MHS-PK/2024/06/CI | 12-Aug-2024 |
+    _lc_lines = clean_text.split('\n')
+    _lc_mode = None
+    _seller_data_lines = []
+    _buyer_data_lines = []
+    _lc_detected = False
+    
+    for _lc_line in _lc_lines:
+        _lc_low = _lc_line.strip().lower()
+        if not _lc_line.strip().startswith('|'):
+            if _lc_mode:
+                _lc_mode = None
+            continue
+        _cells = [c.strip() for c in _lc_line.split('|') if c.strip()]
+        if not _cells:
+            continue
+        _seller_kws = ['beneficiary', 'exporter', 'seller']
+        _buyer_kws = ['applicant', 'importer', 'buyer']
+        
+        if any(k in _lc_low for k in _seller_kws) and re.search(r'^\d+\.', _cells[0].strip()):
+            _lc_mode = 'seller'
+            _lc_detected = True
+            continue
+        elif any(k in _lc_low for k in _buyer_kws) and re.search(r'^\d+\.', _cells[0].strip()):
+            _lc_mode = 'buyer'
+            continue
+        elif re.search(r'^\d+\.\s', _cells[0].strip()):
+            _lc_mode = None
+            continue
+        
+        # Skip separator rows (|------|------|)
+        if all(re.fullmatch(r'[-\s:+]+', c) for c in _cells):
+            continue
+        
+        if _lc_mode == 'seller':
+            _seller_data_lines.append(_cells)
+        elif _lc_mode == 'buyer':
+            _buyer_data_lines.append(_cells)
+    
+    if _lc_detected and _seller_data_lines:
+        if not invoice.sellerName:
+            _s_name = re.sub(r'^\d+\.\s*', '', _seller_data_lines[0][0]).strip()
+            if _s_name and len(_s_name) > 5:
+                invoice.sellerName = _s_name
+            # Extract invoiceID and date from additional cells
+            for _cv in _seller_data_lines[0][1:]:
+                _cv = _cv.strip()
+                if not _cv:
+                    continue
+                if not invoice.invoiceID and re.match(r'^[A-Z0-9][A-Za-z0-9\-/]+$', _cv) and len(_cv) >= 3:
+                    invoice.invoiceID = _cv
+                if not invoice.invoiceDate:
+                    _months_tmp = {'jan':'01','feb':'02','mar':'03','apr':'04','may':'05','jun':'06',
+                                   'jul':'07','aug':'08','sep':'09','oct':'10','nov':'11','dec':'12'}
+                    m_d = re.match(r'(\d{1,2})[\-/]([A-Za-z]{3,9})[\-/](\d{4})', _cv)
+                    if m_d and m_d.group(2).lower()[:3] in _months_tmp:
+                        invoice.invoiceDate = f"{m_d.group(1).zfill(2)}/{_months_tmp[m_d.group(2).lower()[:3]]}/{m_d.group(3)}"
+        if not invoice.sellerAddress and len(_seller_data_lines) > 1:
+            _s_addr = re.sub(r'^\d+\.\s*', '', _seller_data_lines[1][0]).strip()
+            if _s_addr and len(_s_addr) > 5:
+                invoice.sellerAddress = _s_addr
+    
+    if _lc_detected and _buyer_data_lines:
+        if not invoice.buyerName:
+            _b_name = re.sub(r'^\d+\.\s*', '', _buyer_data_lines[0][0]).strip()
+            if _b_name and len(_b_name) > 3:
+                invoice.buyerName = _b_name
+        if not invoice.buyerAddress and len(_buyer_data_lines) > 1:
+            _b_addr = re.sub(r'^\d+\.\s*', '', _buyer_data_lines[1][0]).strip()
+            if _b_addr and len(_b_addr) > 5:
+                invoice.buyerAddress = _b_addr
+
     # ===== THE APPLICANT: → buyer =====
     # Support both pipe-table: "| Applicant: | FINE TECH INDUSTRIES |" and plain text
     if not invoice.buyerName:
@@ -4830,6 +4966,18 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
                     break
             if is_dup:
                 invoice.itemList = first_half
+
+    # ---- APPLY HS CODE TO ITEMS (from raw text) ----
+    # L/C invoices often have "HS NUMBER : 2836.50.90" outside the items table
+    if invoice.itemList:
+        _hs_code = None
+        _hs_m = re.search(r'(?:HS\s*(?:NUMBER|CODE|NO\.?))\s*:\s*([0-9][0-9\.]+)', raw_text, re.I)
+        if _hs_m:
+            _hs_code = _hs_m.group(1).strip().rstrip('.')
+        if _hs_code:
+            for item in invoice.itemList:
+                if not item.productCode:
+                    item.productCode = _hs_code
 
     # FINAL FALLBACK: "Max Number Strategy"
     # If totalAmount is missing or suspiciously equal to Tax Amount (e.g. 79400 vs 794000)

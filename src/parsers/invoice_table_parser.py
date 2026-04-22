@@ -151,7 +151,7 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
                    "total (usd)", "total (eur)", "total (gbp)", "total (€)"],
         # qty MUST come BEFORE unit to avoid "NO.OF UNIT" matching "unit" first
         "qty": ["số lượng", "sl", "quantity", "qty", "数量", "no.of unit", "no. of unit",
-                "hrs/qty", "pcs"],
+                "hrs/qty", "pcs", "net weight", "number of packages"],
         "unit": ["đvt", "đơn vị", "unit of measure", "unit"],
         "payment": ["thành tiền sau thuế", "tổng tiền sau thuế", "cộng tiền thanh toán", "tổng cộng"],
         "currency_col": ["currency", "货号"],
@@ -161,6 +161,7 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
     # 1. Identify headers to map columns
     header_map = {} # col_index -> field_name
     data_start_idx = 0
+    _header_unit = None  # Unit extracted from column header, e.g. (MT) from "Quantity. (MT)"
     
     # Pre-process: join multi-line table cells
     # When a line starts with | but the next line(s) don't start with |,
@@ -291,9 +292,24 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
                             header_map[logical_idx2] = 'amount'
                     logical_idx2 += 1
             
+            # Extract embedded unit from column headers like "Quantity. (MT)", "Unit Price. (USD/MT)"
+            _header_unit = None
+            for _hi, _hf in header_map.items():
+                if _hf == 'qty' and _hi < len(cols):
+                    # Look for (UNIT) pattern in quantity column header
+                    _um = re.search(r'\(([A-Za-z]{1,10})\)', cols[_hi])
+                    if _um:
+                        _header_unit = _um.group(1)
+                elif _hf == 'price' and _hi < len(cols) and not _header_unit:
+                    # Also try extracting from price header: "Unit Price. (USD/MT)" → MT
+                    _um2 = re.search(r'\w+/([A-Za-z]{1,10})\)', cols[_hi])
+                    if _um2:
+                        _header_unit = _um2.group(1)
+            
             # print(f"DEBUG TABLE PARSER: Header detected at line {i}")
             # print(f"  Columns: {cols}")
             # print(f"  Header map: {header_map}")
+            # print(f"  Header unit: {_header_unit}")
             break
             
     # If no header found, assume standard layout if enough columns
@@ -344,6 +360,27 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
         
         # Skip separator lines like |---|---|
         if set(line.strip()).issubset({"|", "-", " ", ":", "+"}):
+            continue
+        
+        # Detect sub-header unit rows like: | | CTNS | KGS | USD/KG | USD |
+        # These are rows where ALL cells are short text or empty (no full numbers)
+        # and at least one cell matches a known unit abbreviation
+        content_check = line.strip().strip("|")
+        _sub_cols = [c.strip() for c in content_check.split("|")]
+        _unit_abbrevs = ['kg', 'kgs', 'mt', 'mts', 'pcs', 'set', 'sets', 'ctns', 'cartons',
+                         'boxes', 'bags', 'rolls', 'units', 'lbs', 'tons', 'cbm', 'ltrs',
+                         'pairs', 'doz', 'dozen', 'ea', 'each', 'nos', 'pkgs', 'drums']
+        _is_unit_row = (len(_sub_cols) >= 3 and
+                        all(len(c) <= 15 for c in _sub_cols) and
+                        all(not re.match(r'^[\d,.]+$', c) for c in _sub_cols if c) and
+                        any(c.strip().lower() in _unit_abbrevs for c in _sub_cols if c))
+        if _is_unit_row:
+            # Extract unit from qty column(s) in header_map
+            if header_map:
+                for _qi, _qf in sorted(header_map.items()):
+                    if _qf == 'qty' and _qi < len(_sub_cols) and _sub_cols[_qi].strip():
+                        _header_unit = _sub_cols[_qi].strip()
+                        # Don't break — take the LAST qty column's unit (e.g., KGS over CTNS)
             continue
             
         content = line.strip().strip("|")
@@ -563,6 +600,10 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
                  item.unitPrice = safe_parse_float(cols[3])
                  item.amount = safe_parse_float(cols[4])
 
+        # Apply header-derived unit if item has no explicit unit
+        if _header_unit and not item.unit:
+            item.unit = _header_unit
+        
         # Validate item: Must have at least a Name or an Amount
         # AND name shouldn't be just a number (like "1" if STT was misparsed as Name)
         if item.productName or item.amount:
