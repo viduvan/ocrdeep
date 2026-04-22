@@ -606,6 +606,37 @@ def zoomtext_65():
     return '# VIETTEL GROUP\n1 Giang Van Minh Street, Ba Dinh District, Hanoi  \nTel: +84 24 6269 8888 | invoices@viettel.com.vn  \nTax ID: 0100109106  \n\n**Date:** 2025-02-20  \n**Due Date:** 2025-03-22  \n\n---\n\n## BILL TO\n\n### PACIFIC IMPORT EXPORT CO., LTD\n88 Hung Vuong Street, Hai Chau District, Da Nang  \nTax ID: 0401112233  \nAttn: Ms. Le Thi Huong  \n\n---\n\n## PAYMENT DETAILS\n\n**Bank:** BIDV – Account: 1200 1122 3344 – Branch: Thanh Xuan  \n**Tax ID (Seller):** 0100109106  \n**Currency:** Vietnamese Dong (VND)  \n**Payment Terms:** Net 30 days  \n\n---\n\n| #  | Description    | Unit    | Qty  | Unit Price (VND) | Amount (VND) |\n|---|---|---|---|---|---|\n| 1  | Mobile Application Development    | project  | 1    | 280,000,000    | 280,000,000  |\n| 2  | UI/UX Design Services    | packa    | 1    | 45,000,000    | 45,000,000   |'
 
 
+# ── Case 66: MHS-PK_2024_06_CI - 2.pdf ──
+def rawtext_66():
+    return '## COMMERCIAL INVOICE\n\n| 1. Beneficiary / Exporter / Seller. | 5. No. & Date of Invoice. |\n|--------------------------------------|--------------------------------|\n| ABC TRADING AND INVESTMENT JOINT STOCK COMPANY | MHS-PK/2024/06/CI | 12-Aug-2024 |\n| MINH ANH VILLAGE, TO COMMUNE THUONG DIST, HANOI CITY, VIETNAM | | |\n| 6. No. & Date of Proforma Invoice. | PROFORMA INVOICE NO. 2403/PI-CAL/MHS-PK | |\n| | Dated: 26-Jul-2024 | |\n| 2. Applicant / Importer / Buver. | | |\n| PT. PRADHA CO., LTD | | |\n| JL.MAYJEND PESANGGRAHAN, KEC.KUTOREJO KAB.MOJOKERTO, TIMUR - INDONESIA | | |\n| 7. Additional Information. | | |\n| HS NUMBER : 2836.50.90 | | |\n| COUNTRY OF ORIGIN: VIETNAM | | |\n| 3. Port of Loading. | 4. Port of Discharge. | | |\n| HAIPHONG PORT, VIETNAM | SURABAYA, INDONESIA | | |\n| | | | |\n| TERMS: CIF SURABAYA, INDONESIA | | |\n| 8. Packaging. | 9. Description of Goods. | 10. Quantity. (MT) | 11. Unit Price. (USD/MT) | 12. Total Value. (USD) |\n| 25kgs/bag | THE NAME OF GOODS : COATED CALCIUM CARBONATE POWDER TYPE OF GOODS : GRADE : MHC2 | 78.00 | 126.00 | 9,828.00 |\n| 3,120 bags | | | | |\n| 3 x 20ST | | | | |\n| Total | | 78.00 | | 9,828.00 |\n\n13. SIGNED BY.\nABC TRADING AND INVESTMENT\nJOINT STOCK COMPANY'
+
+def zoomtext_66():
+    return '# COMMERCIAL INVOICE\n\n| 1. Beneficiary/ Exporter/ Seller. | 5. No. & Date of Invoice. |\n|---|---|\n| ABC TRADING AND INVESTMENT JOINT STOCK COMPANY | MHS-PK/2024/06/CI | 12-Aug-2024 |\n| MINH ANH / VILLAGE, TO COMMUNE THUONG DIST, HANOI CITY, VIETNAM | | |\n| | 6. No. & Date of Proforma Invoice. |\n| | PROFORMA INVOICE NO. 2403/PI-CAL/MHS-PK |\n| | Dated: 26-Jul-2024 |\n| 2. Applicant/ Importer/ Buyer. | |\n| PT. PRADHA CO., LTD | | |\n| JL MAYJEND | PESANGORAHAN | |\n| | 7. Additional Information. | |'
+
+
+# ── Case 67: MHS-PK_2024_06_CI.pdf ──
+def rawtext_67():
+    return '## COMMERCIAL INVOICE\n\n| 1. Beneficiary/ Exporter/ Seller. | 5. No. & Date of Invoice. |\n|-----------------------------------|--------------------------------|\n| ABC TRADING AND INVESTMENT JOINT STOCK COMPANY | MHIS-PK/2024/06/CI | 12-Aug-2024 |\n| MINH ANH VILLAGE, TO COMMUNE THUONG DIST, HANOI CITY, VIETNAM | | |\n| 6. No. & Date of Proforma Invoice. | PROFORMA INVOICE NO. 2403/PI-CAL/MHIS-PK | |\n| | Dated: 26-Jul-2024 | |\n| 2. Applicant/ Importer/ Buver. | | |\n| PT. PRADHA CO., LTD | | |\n| JL.MAYJEND PESANGGRAHAN, KEC.KUTOREJO KAB.MOJOKERTO, TIMUR - INDONESIA | | |\n| 7. Additional Information. | | |\n| HS NUMBER : 2836.50.90 | | |\n| COUNTRY OF ORIGIN: VIETNAM | | |\n| 3. Port of Loading. | 4. Port of Discharge. | |\n| HAIPHONG PORT, VIETNAM | SURABAYA, INDONESIA | |\n| CREDIT NUMBER: I028183 ISSUING DATE: 08.08.2024 | | |\n\n**TERMS: CIF SURABAYA, INDONESIA**\n\n| 8. Packaging. | 9. Description of Goods. | 10. Quantity. (MT) | 11. Unit Price. (USD/MT) | 12. Total Value. (USD) |\n|---------------|-----------------------------|----------------------|--------------------------|--------------------------|\n| 25kgs/bag    | THE NAME OF GOODS : COATED CALCIUM CARBONATE POWDER TYPE OF GOODS : GRADE : MHC2 | 78.00 | 126.00 | 9,828.00 |\n| 3 x 20ST       | | | | |\n| **Total**     | | **78.00** | | **9,828.00** |\n\n**13. SIGNED BY.**\nABC TRADING AND INVESTMENT JOINT STOCK COMPANY'
+
+def zoomtext_67():
+    return 'ABC TRADING  AND INVESTMENT JOINT STOCK COMPANY  \nAdd.: MINH ANH  Village, To  Commune, Thuong  Dist., Hanoi City, Vietnam  \n\n# COMMERCIAL INVOICE  \n\n| 1. Beneficiary / Exporter / Seller. | 5. No. & Date of Invoice. |\n|---|---|\n| ABC TRADING AND INVESTMENT JOINT STOCK COMPANY | MHS-PK/2024/06/CI 12-Aug-2024 |\n| MINH ANH  / VILLAGE, TO  COMMUNE THUONG  DIST, HANOI CITY, VIETNAM | |\n| 2. Applicant/ Importer/ Buyer. | 6. No. & Date of Proforma Invoice. |\n| PT. PRADHA CO., LTD | PROFORMA INVOICE NO. 2403/PI-CAL/MHS-PK |\n| JL MAYJEND | Dated: 26-Jul-2024 |\n| PESANGGRAHAN | 7. Additional Information. |'
+
+
+# ── Case 68: 20280.pdf ──
+def rawtext_68():
+    return 'Cuong Thuan Services\n19 Le Loi Avenue, Hai Chau District, Da Nang, Vietnam\nBeneficiary: Cuong Thuan Services\nBank: Bank account: SWIFT Code:\nTel:\n\nINVOICE\n\nBill to: Polar Underline Innovations\nPhone: Invoice #: 20280\nAddress: 36 Fifth Avenue, Manhattan, New York, United States\nFax: Invoice Date: 9/15/2023\n\nCustomer: Polar Underline Innovations\nAddress: 36 Fifth Avenue, Manhattan, New York, United States\nInvoice For PO#: Delivery term: CIF\n\n| Item # | Description | Quantity | Unit Price | Unit | Price |\n|--------|-------------|----------|-----------|------|-------|\n| 1      | Wood Pellets | 812642   | USD 0.18   | pax  | USD 150,009 |\n\nSignature\n\nInvoice Subtotal: USD 150,009\n\nTax Rate: 10%\n\nSales Tax: USD 15,001\n\nOther\n\nTOTAL: USD 165010'
+
+def zoomtext_68():
+    return 'Cuong Thuan Services  \n19 Le Loi Avenue, Hai Chau District,  \nDa Nang, Vietnam  \nTel:  \n\nBeneficiary: Cuong Thuan Services  \nBank:  \nBank account:  \n\nSWIFT Code:  \n\n| INVOICE    |    |    |\n|---|---|---|\n| Bill to: Polar Underline Innovations    | Phone:    | Invoice #: 20280    |\n| Address: 36 Fifth Avenue, Manhattan, New York, United States | Fax:    | Invoice Date: 9/15/2023    |\n\nCustomer: Polar Underline Innovations'
+
+
+# ── Case 69: 096_NTB_2024.pdf ──
+def rawtext_69():
+    return 'FIRST CLASS NGHEU INTERNATIONAL JOINT STOCK COMPANY  \nQuan Lai Beach, Cua Lo District, Nghe An Province, Vietnam  \nWebsite: firstclassngheuintl.com; Email: minhtri@firstclassngheuintl.com  \n\n# COMMERCIAL INVOICE  \n\n**APPLICANT:**  \nBRASMIENEOENEO SPA LTD JSC  \nESTROOTINEA EN LE DONA 10000-345 PENELA ITALY  \n\n**PORT OF LOADING:**  \nHAIPHONG, VIETNAM  \n\n**PORT OF DISCHARGE:**  \nGENOVA PORT, ITALY  \n\n**CONTAINER/SEAL NO:**  \nOTPU6499618/YMAQ903679  \n\n**NUMBER OF LOT:**  \nTH2407166, TH2407167  \n\n**L/C NUMBER:**  \n1090510125175387  \n\n---\n\n| DESCRIPTION OF GOODS    | Number Of Packages | NET WEIGHT | UNIT PRICE    | AMOUNT |\n|---|---|---|---|---|\n| AS PER PROFORMA INVOICE NO.002/TB- EFFEGI/2024 DATED JUNE 28, 2024 |    |    | DELIVERY TERMS: CFR GENOVA PORT, ITALY |    |\n|    | CTNS    | KGS    | USD/KG    | USD    |\n| FROZEN COOKED WHOLE BROWN CLAM, LATIN NAME: MERETRIX LYRATA, SIZE (PES/KG): 60/80 PACKING: IQF, 1 KG VACUUM BAG WITH RIDER X10/MASTER CARTON | 2,500    | 25,000.00  | 1.68    | 42,000.00 |\n| TOTAL    | 2,500    | 25,000.00  |    | 42,000.00 |\n\n**SAY:** UNITED STATES DOLLARS FORTY TWO THOUSAND ONLY.  \n\n---\n\n**No:** 096/NTB/2024  \n**DATE:** AUG 11, 2024  \n\n**Scanned with CamScanner**'
+
+def zoomtext_69():
+    return 'FIRST CLASS NGHEU INTERNATIONAL JOINT STOCK COMPANY  \nQuan Lai Beach, Cua Lo District, Nghe An Province, Vietnam  \nWebsite: firstclassngheuintl.com; Email: minhtri@firstclassngheuintl.com  \n\nCOMMERCIAL INVOICE  \n\nAPPLICANT:  \nBRASMIENEOENEO SPA LTD JSC  \nESTROOTINEA EN LE DONA 10000-345 PENELA ITALY  \n\nPORT OF LOADING:  \nHAIPHONG, VIETNAM  \n\nPORT OF DISCHARGE:  \nGENOVA PORT, ITALY  \n\nCONTAINER/SEAL NO:  \nOTPU6499618/YMAQ903679  \n\nNUMBER OF LOT:  \nTH2407166, TH2407167  \n\nL/C NUMBER:  \n1090510125175387  \n\nNo: 096/NTB/2024  \nDATE: AUG 11, 2024  \n\nDESCRIPTION OF GOODS  \nUNIT PRICE'
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # REGISTRY
@@ -676,6 +707,10 @@ CASES = [
     (63, 'invoice_01_INV-20250102.pdf', rawtext_63, zoomtext_63),
     (64, 'invoice_02_INV-20250201.pdf', rawtext_64, zoomtext_64),
     (65, 'invoice_03_INV-20250305.pdf', rawtext_65, zoomtext_65),
+    (66, 'MHS-PK_2024_06_CI - 2.pdf', rawtext_66, zoomtext_66),
+    (67, 'MHS-PK_2024_06_CI.pdf', rawtext_67, zoomtext_67),
+    (68, '20280.pdf', rawtext_68, zoomtext_68),
+    (69, '096_NTB_2024.pdf', rawtext_69, zoomtext_69),
 ]
 
 if __name__ == "__main__":
