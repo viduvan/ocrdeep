@@ -1438,6 +1438,14 @@ def zoomtext_171():
     return '# HÒA ĐƠN GIÁ TRỊ GIA TĂNG  \nKý hiệu: 001  \nNgày: 5/3/2025  \nSố: INV-40885  \n\nNgười bán: Tan TinCay Partners  \nMã số thuế:  \nĐịa chỉ: 34 Trần Phú, Quận Hà Đông, Hà Nội, Việt Nam  \nĐiện thoại: Số tài khoản:  \n\nNgười mua: Phoenix Spring Advisory  \nMã số thuế:  \nĐịa chỉ: 30 Nguyễn Trãi, Quận 1, Thành phố Hồ Chí Minh, Việt Nam  \n\n| STT | Tên hàng hóa, dịch vụ | Đơn vị tính | Số lượng | Đơn giá | Thành tiền | Thuế suất | Thuế GTGT | Tổng tiền sau thuế |\n|---|---|---|---|---|---|---|---|---|\n\n--- ZOOM RIGHT ---\nKý hiệu: 001  \nSố: INV-40885'
 
 
+# ── Case 172: 5551332.pdf ──
+def rawtext_172():
+    return '# HÓA ĐƠN GIÁ TRỊ GIA TĂNG  \n(VAT INVOICE)  \n\n**Ký hiệu (Serial):** 1K24TAH  \n**Số (No.):** 5551332  \n\n**Bản thể hiện của hóa đơn điện tử**  \n*(Electronic invoice display)*  \n\n**Ngày (date):** 30 tháng (month) 09 năm (year) 2024  \n\n---\n\n**Đơn vị bán hàng (Issued):** TỔNG CÔNG TY CP BƯU CHÍNH VIETTEL  \n\n**Mã số thuế (Tax code):** 0104093672  \n\n**Địa chỉ (Address):** Số 2, ngõ 15 phố Duy Tân, Phường Dịch Vọng Hậu, Quận Cầu Giấy, Thành Phố Hà Nội, Việt Nam  \n\n---\n\n**Họ tên người mua hàng (Buyer name):**  \nTên đơn vị (Company name): CÔNG TY TNHH ĐÀO TẠO THIÊN ƯNG  \n\n**Mã số thuế (Tax code):** 0110329220  \n\n**Địa chỉ (Address):** Nhà lò B11, số 9A, ngõ 181 đường Xuân Thủy, Phường Dịch Vọng Hậu, Quận Cầu Giấy, Thành phố Hà Nội, Việt Nam  \n\n---\n\n**Hình thức thanh toán (Payment method):** TM/CK  \n\n**Số tài khoản (Account No.):**  \n\n**Ghi chú (Note):**  \n\n| STT (No.) | Tên hàng hóa, dịch vụ (Description) | DVT (Unit) | Số lượng (Quantity) | Đơn giá (Unit price) | Thành tiền (Amount) |\n|---|---|---|---|---|---|\n| 1    | 2    | 3    | 4    | 5    | 6 = 4 x 5    |\n| 1    | Cuộc chuyển phát tháng 09/2024    | Tháng    | 1    | 712.456    | 712.456    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n\n**Cộng tiền hàng (Total amount):** 712.456  \n\n**Thuế suất GTGT (VAT rate):** 8%  \n\n**Tiền thuế GTGT (VAT Amount):** 56.996  \n\n**Tổng cộng tiền thanh toán (Total payment):** 769.452  \n\n---\n\n**Số tiền viết bằng chữ (Amount in words):** Bảy trăm sáu mươi chín nghìn bốn trăm năm mươi hai đồng  \n\n**Người mua hàng (Buyer)**  \n**Người bán hàng (Seller)**  \n**Signature valid**  \n**Ký bởi TỔNG CÔNG TY CỔ PHẦN BƯU CHÍNH VIETTEL**  \n**Ký ngày 03/10/2024**'
+
+def zoomtext_172():
+    return ''
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # REGISTRY
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1612,6 +1620,7 @@ CASES = [
     (169, '94.jpg', rawtext_169, zoomtext_169),
     (170, 'hóa đơn1.png', rawtext_170, zoomtext_170),
     (171, '1.-BID_Non-duplicate_65571_Invoice_Domestic.pdf', rawtext_171, zoomtext_171),
+    (172, '5551332.pdf', rawtext_172, zoomtext_172),
 ]
 
 
