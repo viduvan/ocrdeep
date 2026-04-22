@@ -1100,6 +1100,9 @@ def parse_seller(lines: List[str], invoice: Invoice):
                 break
 
         # ===== CONTINUATION LINE =====
+        # Skip markdown separator lines (---) — they are not content
+        if not matched and pending_field and clean and re.fullmatch(r'-{2,}', clean.strip()):
+            continue
         if not matched and pending_field and clean:
             # Stop at standalone labels (no colon) - re-match for new field
             _seller_standalone_labels = {'phone', 'email', 'tel', 'fax', 'contact person', 'address',
@@ -1385,6 +1388,9 @@ def parse_buyer(block: List[str], invoice: Invoice):
             matched = True
 
         # ===== CONTINUATION LINE (for multi-line values like address) =====
+        # Skip markdown separator lines (---) — they are not content
+        if not matched and pending_field and clean and re.fullmatch(r'-{2,}', clean.strip()):
+            continue
         if not matched and pending_field and clean:
             # Stop continuation if this line looks like a new section/label
             is_section = any(k in low for k in ["reason for", "material", "description",
