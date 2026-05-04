@@ -2388,11 +2388,11 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
         if not invoice.invoiceID:
             m = re.search(r'\bNumber\s*[:\s]+([A-Z]{2,5}\d+|\d{2,})', raw_text, re.I)
             if m:
-                # Check context: exclude Importer Number, Order Number, Account Number, etc.
+                # Check context: exclude Importer Number, Order Number, Account Number, HS Number, Credit Number, etc.
                 before = raw_text[max(0, m.start()-20):m.start()].lower()
                 _excluded_prefixes = ['importer', 'order', 'account', 'phone', 'contact',
                                       'sales order', 'waybill', 'tracking', 'package',
-                                      'export', 'eori']
+                                      'export', 'eori', 'hs', 'credit', 'l/c', 'lc']
                 if not any(before.rstrip().endswith(ep) for ep in _excluded_prefixes):
                     invoice.invoiceID = m.group(1)
         
@@ -4113,8 +4113,11 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
     # ===== INVOICE ID =====
     if not invoice.invoiceID:
         id_patterns = [
-            # L/C trade: "No. & Date of Invoice\nS.W-2019043 Feb 14, 2019"
+            # L/C trade: "No. & Date of Invoice\nS.W-2019043 Feb 14, 2019" (plain text)
             r'No\.?\s*(?:&|and)\s*Date\s+of\s+Invoice\s*\n\s*([A-Za-z0-9][\w\.\-/]+)',
+            # L/C pipe-table: "| 5. No. & Date of Invoice. |\n|---|\n| ... | MHS-PK/2024/06/CI 12-Aug-2024 |"
+            # Extract ID from second cell — stops before space+date (e.g. "MHS-PK/2024/06/CI 12-Aug-2024" → "MHS-PK/2024/06/CI")
+            r'No\.?\s*(?:&|and)\s*Date\s+of\s+Invoice[^|\n]*\|[^\n]*\n(?:\|[-\s|]+\n)?\|[^|\n]*\|\s*([A-Za-z0-9][\w\-/]+)',
             r'(?<!PROFORMA )(?:INV\.?\s*NO\.?|Invoice\s*No\.?|Invoice\s*#|Invoice\s*Number)[:\s]*[#]?\s*([A-Za-z0-9][\w\-/]+(?:\s+\d{4})?)',
             r'(?:INVOICE\s*#)[:\s]*([\w\-/]+)',
             # "Export Invoice No & Date" in pipe table: header row → next row first cell
@@ -4125,8 +4128,8 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
             r'Invoice\s*Number\s*[:]*\s*\n\s*\n?\s*([A-Za-z0-9][\w\-/]+)',
             # "EXPORT REFERENCES (i.e., order no., invoice no.)\n2786"
             r'EXPORT\s+REFERENCES[^\n]*\n\s*([A-Za-z0-9][\w\-/]+)',
-            # "**Number:** INC 2025121" — standalone Number label (exclude Account Number, Phone Number, etc.)
-            r'(?<!Account\s)(?<!Phone\s)(?<!Fax\s)(?<!Serial\s)(?<!Tracking\s)(?<!IncoDocs\s)(?<!Importer\s)(?<!Exporter\s)(?<!Order\s)(?<!Customer\s)(?<!Sales\s)(?<![A-Za-z])Number\s*:\s*([A-Za-z0-9][\w \-/]{2,30})',
+            # "**Number:** INC 2025121" — standalone Number label (exclude Account Number, Phone Number, HS Number, Credit Number, etc.)
+            r'(?<!Account\s)(?<!Phone\s)(?<!Fax\s)(?<!Serial\s)(?<!Tracking\s)(?<!IncoDocs\s)(?<!Importer\s)(?<!Exporter\s)(?<!Order\s)(?<!Customer\s)(?<!Sales\s)(?<!CREDIT\s)(?<!Credit\s)(?<!HS )(?<![A-Za-z])Number\s*:\s*([A-Za-z0-9][\w \-/]{2,30})',
             # "My Reference: REF11421" or "Reference: INV-2024" (fallback, only after all specific patterns)
             r'(?:My\s+)?Reference\s*:\s*([A-Za-z][\w\-/]{3,30})',
         ]
@@ -4152,15 +4155,22 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
         _bad_ids = {'shipper', 'exporter', 'consignee', 'importer', 'invoice',
                     'commercial', 'proforma', 'number', 'date', 'serial'}
         for pat in id_patterns:
+            if invoice.invoiceID:
+                break
             m = re.search(pat, clean_text, re.I)
             if m:
                 val = m.group(1).strip().strip('*').strip('#')
                 if val and len(val) >= 1 and not re.fullmatch(r'\d{1,2}', val):
                     # Reject pure words, words with slashes like 'Shipper/Exporter'
                     clean_val = val.replace('/', '').replace('-', '').replace('.', '').replace(' ', '')
+                    # Reject HS-code-like pure-numeric values ONLY for generic "Number:" pattern
+                    # (EXPORT REFERENCES "2786", Export Invoice No "1892" are valid pure-number IDs)
+                    _is_pure_numeric = re.fullmatch(r'[\d\.]+', val)
+                    _pat_is_number_label = 'Number' in pat and 'REFERENCES' not in pat and 'Invoice' not in pat
                     if (val.lower() not in _bad_ids
                             and not re.fullmatch(r'[A-Za-z]+', clean_val)
-                            and not re.fullmatch(r'[A-Za-z]+/[A-Za-z]+', val)):
+                            and not re.fullmatch(r'[A-Za-z]+/[A-Za-z]+', val)
+                            and not (_is_pure_numeric and _pat_is_number_label)):
                         invoice.invoiceID = val
                         break
     
@@ -4183,14 +4193,21 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
                   'january': '01', 'february': '02', 'march': '03', 'april': '04',
                   'june': '06', 'july': '07', 'august': '08', 'september': '09',
                   'october': '10', 'november': '11', 'december': '12'}
+        # Strip L/C metadata lines that carry dates we do NOT want (ISSUING DATE, CREDIT NUMBER line, etc.)
+        # to avoid false positive matches by generic date patterns
+        _date_clean_text = re.sub(
+            r'(?:ISSUING|VALIDITY|EXPIRY|CREDIT|SHIPMENT)\s+(?:DATE|NUMBER)[^|\n]*',
+            '', clean_text, flags=re.I
+        )
         
         date_patterns = [
             # "Date: 20-Nov-2017" or "INV. DATE: APR 4TH,2025"
-            (r'(?:INV\.?\s*)?DATE\s*[:\s]+(\d{1,2})[\s\-/.](\w{3,9})[\s\-/.,]*(\d{2,4})', 'dmy_name'),
-            # "Date: October 26, 2028" or "DEC 14th 2021" or "Date of Shipment:\n04/24/2024"
-            (r'(?:INV\.?\s*)?DATE[^:]*[:\s]+(\w{3,9})\.?\s*(\d{1,2})(?:st|nd|rd|th)?,?\s*(\d{4})', 'mdy_name'),
+            # Exclude: ISSUING DATE, VALIDITY DATE, EXPIRY DATE, CREDIT DATE (L/C metadata)
+            (r'(?<!ISSUING )(?<!VALIDITY )(?<!EXPIRY )(?<!CREDIT )(?<!SHIPMENT )(?:INV\.?\s*)?DATE\s*[:\s]+(\d{1,2})[\s\-/.](\w{3,9})[\s\-/.,]*(\d{2,4})', 'dmy_name'),
+            # "Date: October 26, 2028" or "DEC 14th 2021"
+            (r'(?<!ISSUING )(?<!VALIDITY )(?<!EXPIRY )(?<!CREDIT )(?<!SHIPMENT )(?:INV\.?\s*)?DATE[^:]*[:\s]+(\w{3,9})\.?\s*(\d{1,2})(?:st|nd|rd|th)?,?\s*(\d{4})', 'mdy_name'),
             # "Date: 08TH MAR 2016" / "1ST January 2025" (day-first with ordinal suffix)
-            (r'(?:INV\.?\s*)?DATE\s*[:\s]+(\d{1,2})(?:ST|ND|RD|TH)\s+(\w{3,9})\.?\s*,?\s*(\d{4})', 'dmy_name_ord'),
+            (r'(?<!ISSUING )(?<!VALIDITY )(?<!EXPIRY )(?<!CREDIT )(?<!SHIPMENT )(?:INV\.?\s*)?DATE\s*[:\s]+(\d{1,2})(?:ST|ND|RD|TH)\s+(\w{3,9})\.?\s*,?\s*(\d{4})', 'dmy_name_ord'),
             # Pipe-table header: "| DATE OF EXPORT |...\n|---|...|\n| 12/1/2013 |..."
             (r'\|\s*DATE\s+OF\s+\w+\s*\|[^\n]*\n\|[-|\s]+\|\n\|\s*(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})\s*\|', 'mdy_num'),
             # "DATE OF EXPORTATION\n06/11/2019"
@@ -4198,11 +4215,12 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
             # Standalone "October 26, 2028" or "March 28, 2024"
             (r'(\w{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})', 'mdy_name'),
             # "Date: mm/dd/yyyy" or "Date: dd/mm/yyyy"
-            (r'(?:INV\.?\s*)?DATE\s*[:\s]+(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})', 'mdy_num'),
+            (r'(?<!ISSUING )(?<!VALIDITY )(?<!EXPIRY )(?<!CREDIT )(?<!SHIPMENT )(?:INV\.?\s*)?DATE\s*[:\s]+(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})', 'mdy_num'),
             # "Date: 2025-12-01"
-            (r'(?:INV\.?\s*)?DATE\s*[:\s]+(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})', 'ymd'),
+            (r'(?<!ISSUING )(?<!VALIDITY )(?<!EXPIRY )(?<!CREDIT )(?<!SHIPMENT )(?:INV\.?\s*)?DATE\s*[:\s]+(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})', 'ymd'),
             # DD.MM.YYYY format (European): "24.03.2025" or "12.2.2022"
-            (r'(\d{1,2})\.(\d{1,2})\.(\d{4})', 'dmy_dot'),
+            # Use negative lookbehind context: reject when part of "ISSUING DATE: DD.MM.YYYY" or similar L/C metadata
+            (r'(?<!ISSUING DATE: )(?<!CREDIT DATE: )(?<!VALIDITY: )(\d{1,2})\.(\d{1,2})\.(\d{4})', 'dmy_dot'),
             # "10 Jan 2018" pattern
             (r'(\d{1,2})\s+(\w{3,9})\s+(\d{4})', 'dmy_name'),
             # Standalone dd/mm/yyyy without label (less specific, lower priority)
@@ -4210,7 +4228,7 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
         ]
         
         for pat, fmt in date_patterns:
-            m = re.search(pat, clean_text, re.I)
+            m = re.search(pat, _date_clean_text, re.I)
             if m:
                 try:
                     if fmt == 'dmy_name' or fmt == 'dmy_name_ord':
