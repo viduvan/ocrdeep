@@ -4973,17 +4973,21 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
             if is_dup:
                 invoice.itemList = first_half
 
+    # NOTE: HS CODE (mã thuế hải quan) từ metadata ngoài bảng không được gán vào productCode.
+    # Nếu HS code có trong cột item table, invoice_table_parser xử lý qua header map "hs code" → "code" → productCode.
     # ---- APPLY HS CODE TO ITEMS (from raw text) ----
     # L/C invoices often have "HS NUMBER : 2836.50.90" outside the items table
-    if invoice.itemList:
-        _hs_code = None
-        _hs_m = re.search(r'(?:HS\s*(?:NUMBER|CODE|NO\.?))\s*:\s*([0-9][0-9\.]+)', raw_text, re.I)
-        if _hs_m:
-            _hs_code = _hs_m.group(1).strip().rstrip('.')
-        if _hs_code:
-            for item in invoice.itemList:
-                if not item.productCode:
-                    item.productCode = _hs_code
+
+    # if invoice.itemList:
+    #     _hs_code = None
+    #     _hs_m = re.search(r'(?:HS\s*(?:NUMBER|CODE|NO\.?))\s*:\s*([0-9][0-9\.]+)', raw_text, re.I)
+    #     if _hs_m:
+    #         _hs_code = _hs_m.group(1).strip().rstrip('.')
+    #     if _hs_code:
+    #         for item in invoice.itemList:
+    #             if not item.productCode:
+    #                 item.productCode = _hs_code
+    
 
     # FINAL FALLBACK: "Max Number Strategy"
     # If totalAmount is missing or suspiciously equal to Tax Amount (e.g. 79400 vs 794000)
