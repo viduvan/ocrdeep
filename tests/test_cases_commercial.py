@@ -639,6 +639,14 @@ def zoomtext_69():
     return 'FIRST CLASS NGHEU INTERNATIONAL JOINT STOCK COMPANY  \nQuan Lai Beach, Cua Lo District, Nghe An Province, Vietnam  \nWebsite: firstclassngheuintl.com; Email: minhtri@firstclassngheuintl.com  \n\nCOMMERCIAL INVOICE  \n\nAPPLICANT:  \nBRASMIENEOENEO SPA LTD JSC  \nESTROOTINEA EN LE DONA 10000-345 PENELA ITALY  \n\nPORT OF LOADING:  \nHAIPHONG, VIETNAM  \n\nPORT OF DISCHARGE:  \nGENOVA PORT, ITALY  \n\nCONTAINER/SEAL NO:  \nOTPU6499618/YMAQ903679  \n\nNUMBER OF LOT:  \nTH2407166, TH2407167  \n\nL/C NUMBER:  \n1090510125175387  \n\nNo: 096/NTB/2024  \nDATE: AUG 11, 2024  \n\nDESCRIPTION OF GOODS  \nUNIT PRICE'
 
 
+# ── Case 70: 2024_TL_139.pdf ──
+def rawtext_70():
+    return 'SPINNING JOINT STOCK COMPANY\n\nLE QUY DON STREET, THAI BINH CITY THAI BINH PROVINCE, VIETNAM\n\nCOMMERCIAL INVOICE\n\nORIGINAL\n\nINVOICE NO.: 2024/TL/139\nDate: 10-Jun-2024\nFor Account and Risk of M/s: HA SPINNING CO.,LTD\nEUNHAENG-RO YEONGDEUNGPO-GU, SEOUL 07237, KOREA\n\n| QUANTITY | VESSEL/ VOY NO. | DATE OF SHIPMENT |\n|----------|-----------------|------------------|\n| 880 CARTONS | SKY TIARA 2411N | 12-Jun-2024 |\n| PORT OF LOADING: | PORT OF DISCHARGE: | B/L NUMBER: |\n| HAI PHONG PORT, VIET NAM | KWANG YANG, KOREA | SMLMHAN4A2404300 |\n\n| SHIPPING MARKS | DESCRIPTION | QUANTITY (Kg) | UNIT PRICE (USD/KG) | AMOUNT (USD) |\n|-----------------|-------------|--------------|------------------|---------------|\n| MADE IN VIET NAM | 100% CARDED COTTON YARN NE 20\'S/1 WAXED FOR KNITTING RAW WHITE ON CONE, CONTAMINATION FREE. \'TRALY\'BRAND | 19,958.40 | 2.836 | 56,602.02 |\n|                 | H.S CODE : 5205.12.00 | | | |\n|                 | L/C NO.: M88SD2404ES01020 | | | |\n|                 | DATE: 30-Apr-2024 | TERMS OF PRICE : CIF KWANG YANG, KOREA | | |\n|                 | SALES CONTRACT NO. : TL-KR/24.0603 (APR.26,2024) | | | |\n|                 | ORIGIN VIETNAM | USD 56,602.02 | | |\n\nAMOUNT IN WORDS: US DOLLARS FIFTY SIX THOUSAND. SIX HUNDRED AND TWO, CENTS TWO ONLY\n\nPACKING : 1.89 KG NET/CONE; 12 CONES/CARTON\n\nG.W. 21,120.00 KGS\n\nSPINNING JOINT STOCK COMPANY'
+
+def zoomtext_70():
+    return 'SPINNING JOINT STOCK COMPANY\n\nLE QUY DON STREET, THAI BINH CITY THAI BINH PROVINCE, VIETNAM\n\nCOMMERCIAL INVOICE\n\nINVOICE NO. : 2024/TL/139  \nFor Account and Risk of M/s:  \n\nDate: 10-Jun-2024  \nHA SPINNING CO.,LTD  \nEUNHAENG-RO YEONGDEUNGPO-GU, SEOUL 07237, KOREA  \n\nORIGINAL  \n\n| QUANTITY | VESSEL/ VOY NO. | DATE OF SHIPMENT |\n|---|---|---|'
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # REGISTRY
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -712,6 +720,7 @@ CASES = [
     (67, 'MHS-PK_2024_06_CI.pdf', rawtext_67, zoomtext_67),
     (68, '20280.pdf', rawtext_68, zoomtext_68),
     (69, '096_NTB_2024.pdf', rawtext_69, zoomtext_69),
+    (70, '2024_TL_139.pdf', rawtext_70, zoomtext_70),
 ]
 
 if __name__ == "__main__":
