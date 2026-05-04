@@ -2967,11 +2967,17 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
             r'[Pp]ayment\s+(?:method|by|terms?)\s*[:\s]+([^\n|]+)',
             r'[Tt]erms?\s+of\s+(?:payment|sale)\s*[:\n]\s*([^\n|]+)',
             r'[Pp]ayment\s*:\s*([^\n|]+)',
+            # L/C trade invoices: "L/C NO.: M88SD2404ES01020" → paymentMethod = "L/C"
+            r'L/C\s+(?:NO\.?|NUMBER|#)',
         ]
         _pm_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', raw_text)
         for pattern in patterns:
             m = re.search(pattern, _pm_text, re.I)
             if m:
+                # Special case: L/C pattern has no capture group → hardcode value
+                if 'L/C' in pattern and not m.lastindex:
+                    invoice.paymentMethod = 'L/C'
+                    break
                 val = m.group(1).strip().strip('*|')
                 # Clean up trailing keywords that might leak into the value
                 val = re.split(r'\s+(?:Hạn|Tổng|Số|Đơn|Tại|Thuế)', val, maxsplit=1)[0].strip()
@@ -3890,9 +3896,9 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
                 if baddr and not invoice.buyerAddress:
                     invoice.buyerAddress = baddr
     
-    # Buyer fallback: "For Account and Risk of : XXX" or "For Account & Risk of Messrs.\nXXX"
+    # Buyer fallback: "For Account and Risk of M/s: XXX" or "For Account & Risk of Messrs.\nXXX"
     if not invoice.buyerName:
-        m = re.search(r'For\s+Account\s+(?:(?:and|&)\s+Risk\s+)?of\s+(?:Messrs\.?\s*)?[:\n]\s*(.+)', clean_text, re.I)
+        m = re.search(r'For\s+Account\s+(?:(?:and|&)\s+Risk\s+)?of\s+(?:Messrs\.?|M/s\.?|M/S\.?)?\s*[:\n]\s*(.+)', clean_text, re.I)
         if m:
             val = m.group(1).strip().strip('*')
             if val and len(val) > 2:
