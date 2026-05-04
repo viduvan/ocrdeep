@@ -434,7 +434,8 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
             # Item detail sub-rows: "Batch:", "Customs Tariff:", "Country of Origin:"
             # These are continuation rows within an item, not standalone items
             _detail_prefixes = ["batch:", "customs tariff:", "country of origin:",
-                                 "batch no", "origin:", "hs:", "tariff:", "siret"]
+                                 "batch no", "origin:", "hs:", "tariff:", "siret",
+                                 "origin vietnam", "origin viet nam"]  # L/C trade metadata rows
             # Only skip if detail prefix is at the START of first/second column
             # (standalone detail row), not when embedded in a multi-line product name
             _skip_detail = False
