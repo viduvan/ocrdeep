@@ -662,7 +662,18 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
         if not (re.match(r'^[\d\.\,]+$', (it.productName or '').strip()) and
                 it.amount is None and it.quantity is None and it.unitPrice is None)
     ]
-    
+
+    # Filter misaligned packaging/continuation rows:
+    # When unitPrice == amount AND qty > 1 AND no productName,
+    # the row is a packaging sub-row where the total value leaked into the unit price column.
+    deduped = [
+        it for it in deduped
+        if not (it.unitPrice is not None and it.amount is not None and
+                it.unitPrice == it.amount and
+                it.quantity is not None and it.quantity > 1 and
+                not it.productName)
+    ]
+
     return deduped
 def parse_structured_items(raw_text: str) -> List[InvoiceItem]:
     """
