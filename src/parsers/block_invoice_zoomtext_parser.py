@@ -60,6 +60,8 @@ def _detect_zoom_blocks(lines: List[str]):
         "sold to", "ship to", "importer:", "importer details",
         "consigned to", "consignee name", "invoice to", "recipient", "receiver",
         "notify party", "customer:", "issued to", "addressed to",
+        # L/C trade pattern: "For Account and Risk of M/s:" or "For Account of:"
+        "for account and risk", "for account & risk", "for account of",
         # Indian invoice
         "billing address", "shipping address",
     ]
