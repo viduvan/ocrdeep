@@ -917,6 +917,14 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
                     if month_abbr in months:
                         invoice.invoiceDate = f"{m.group(1).zfill(2)}/{months[month_abbr]}/{m.group(3)}"
 
+            # Pattern: 10-Jun-2024 / 12 Aug 2024 / 26-Jul-2024 (day-month_name-year, no ordinal)
+            if not invoice.invoiceDate:
+                m = re.search(r"(\d{1,2})[/\s\-]([A-Za-z]{3,9})\.?[/\s\-,]*(\d{4})", clean, re.I)
+                if m:
+                    month_abbr = m.group(2).lower()[:3]
+                    if month_abbr in months:
+                        invoice.invoiceDate = f"{m.group(1).zfill(2)}/{months[month_abbr]}/{m.group(3)}"
+
             # Pattern: date: 2025-04-04 or date: 2025/04/04
             if not invoice.invoiceDate:
                 m = re.search(r"date[:\s]+(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})", clean, re.I)
