@@ -4199,6 +4199,12 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
             r'(?:ISSUING|VALIDITY|EXPIRY|CREDIT|SHIPMENT)\s+(?:DATE|NUMBER)[^|\n]*',
             '', clean_text, flags=re.I
         )
+        # Also strip "DATE:" inside pipe-table cells — these are L/C / contract dates, not invoice dates
+        # e.g. "| | DATE: 30-Apr-2024 | TERMS OF PRICE ... |"
+        _date_clean_text = re.sub(
+            r'\|\s*DATE\s*:\s*[^|\n]+\|',
+            '| |', _date_clean_text, flags=re.I
+        )
         
         date_patterns = [
             # "Date: 20-Nov-2017" or "INV. DATE: APR 4TH,2025"
@@ -4221,8 +4227,8 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
             # DD.MM.YYYY format (European): "24.03.2025" or "12.2.2022"
             # Use negative lookbehind context: reject when part of "ISSUING DATE: DD.MM.YYYY" or similar L/C metadata
             (r'(?<!ISSUING DATE: )(?<!CREDIT DATE: )(?<!VALIDITY: )(\d{1,2})\.(\d{1,2})\.(\d{4})', 'dmy_dot'),
-            # "10 Jan 2018" pattern
-            (r'(\d{1,2})\s+(\w{3,9})\s+(\d{4})', 'dmy_name'),
+            # "10 Jan 2018" or "12-Aug-2024" pattern (space or hyphen separated)
+            (r'(\d{1,2})[\s\-]+(\w{3,9})[\s\-,]+(\d{4})', 'dmy_name'),
             # Standalone dd/mm/yyyy without label (less specific, lower priority)
             (r'(\d{2})[/\-](\d{2})[/\-](\d{4})', 'mdy_num'),
         ]
