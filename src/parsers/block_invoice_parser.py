@@ -4205,6 +4205,18 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
             r'\|\s*DATE\s*:\s*[^|\n]+\|',
             '| |', _date_clean_text, flags=re.I
         )
+        # Strip "DATED month day, year" or "DATED DD-Mon-YYYY" or "DATED DD.MM.YYYY" references (proforma/L/C dates)
+        # e.g. "DATED JUNE 28, 2024", "DATED 22.03.2024", "dated 14.03.2024"
+        _date_clean_text = re.sub(
+            r'DATED\s+(?:[A-Za-z]+\s+\d{1,2},?\s+\d{4}|\d{1,2}[\s\-][A-Za-z]+[\s\-]\d{4}|\d{1,2}[./\-]\d{1,2}[./\-]\d{4})',
+            '', _date_clean_text, flags=re.I
+        )
+        # Strip standalone dates inside pipe-table cells (shipment dates, etc.)
+        # e.g. "| 12-Jun-2024 |" or "| 26 Jul 2024 |"
+        _date_clean_text = re.sub(
+            r'\|\s*\d{1,2}[\s\-][A-Za-z]{3,9}[\s\-,]*\d{4}\s*\|',
+            '| |', _date_clean_text, flags=re.I
+        )
         
         date_patterns = [
             # "Date: 20-Nov-2017" or "INV. DATE: APR 4TH,2025"
@@ -4960,8 +4972,12 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
             )
             
             # Filter purely numeric short names (metadata from footer tables)
+            # BUT keep items that have all numeric data (qty, price, amount) — these are valid items
+            # where productName is just the row number (e.g. Item# column: "1", "2", "16")
+            _has_full_data = (item.quantity is not None and item.unitPrice is not None and item.amount is not None)
             is_numeric_name = (name_stripped.replace('.', '').replace(',', '').isdigit()
-                              and len(name_stripped) <= 5)
+                              and len(name_stripped) <= 5
+                              and not _has_full_data)
             
             # Filter short names that are shipping carriers/modes (not real products)
             _shipping_prefixes = ['fedex', 'dhl ', 'ups ', 'forwarder', 'transporteur']
