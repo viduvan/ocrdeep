@@ -4295,6 +4295,23 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
             invoice.currency = 'USD'
     
     # ===== TOTAL AMOUNT (EN patterns) =====
+    # Special handling for Grand Total on separate line with multiple numbers below
+    # e.g. "GRAND TOTAL\n24,522 4,087 23,789.50 58,684.13" — last number is the Amount
+    if not invoice.totalAmount:
+        _grand_m = re.search(
+            r'(?:Grand\s+Total|Total\s+Invoice\s*Value|Total\s+Net\s+Value)\s*\n([^\n]+)',
+            clean_text, re.I
+        )
+        if _grand_m:
+            _all_nums = re.findall(r'[\d,]+\.?\d*', _grand_m.group(1))
+            if len(_all_nums) >= 2:
+                _last_val = safe_parse_float(_all_nums[-1])
+                if _last_val and _last_val > 10:
+                    invoice.totalAmount = _last_val
+            elif len(_all_nums) == 1:
+                _val = safe_parse_float(_all_nums[0])
+                if _val and _val > 10:
+                    invoice.totalAmount = _val
     if not invoice.totalAmount:
         total_patterns = [
             r'EXW[:\s].*?([\d,\.]+)\s*$',
@@ -5264,6 +5281,10 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
             _item_sum = sum(it.amount or 0 for it in invoice.itemList)
             if _item_sum > 0:
                 invoice.preTaxPrice = _item_sum
+        # Cap preTaxPrice to totalAmount when no tax (OCR errors in items can inflate the sum)
+        if (invoice.preTaxPrice and invoice.totalAmount and not invoice.taxAmount
+                and invoice.preTaxPrice > invoice.totalAmount):
+            invoice.preTaxPrice = invoice.totalAmount
         # Derive taxAmount from totalAmount - preTaxPrice
         if not invoice.taxAmount and invoice.totalAmount and invoice.preTaxPrice:
             _tax_calc = invoice.totalAmount - invoice.preTaxPrice
