@@ -150,7 +150,7 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
                    "tol.amount", "total gross", "value in", "net value", "value",
                    "total (usd)", "total (eur)", "total (gbp)", "total (€)"],
         # qty MUST come BEFORE unit to avoid "NO.OF UNIT" matching "unit" first
-        "qty": ["số lượng", "sl", "quantity", "qty", "数量", "no.of unit", "no. of unit",
+        "qty": ["số lượng", "sl", "quantity", "qty", "q-ty", "数量", "no.of unit", "no. of unit",
                 "hrs/qty", "pcs", "net weight", "number of packages"],
         "unit": ["đvt", "đơn vị", "unit of measure", "unit"],
         "payment": ["thành tiền sau thuế", "tổng tiền sau thuế", "cộng tiền thanh toán", "tổng cộng"],
@@ -291,6 +291,25 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
                         if not words_in_col.intersection(_weight_words):
                             header_map[logical_idx2] = 'amount'
                     logical_idx2 += 1
+            
+            # Resolve duplicate 'qty' columns:
+            # e.g. "Q-ty (MTRS)" + "(PCS)" both match qty keywords.
+            # Keep the column with explicit "qty"/"quantity" keyword; unmap secondary columns.
+            qty_cols = [idx for idx, f in header_map.items() if f == 'qty']
+            if len(qty_cols) > 1:
+                # Find the column with explicit "qty" or "quantity" keyword
+                _primary_qty = None
+                for qidx in qty_cols:
+                    _col_low = cols[qidx].lower() if qidx < len(cols) else ''
+                    if any(kw in _col_low for kw in ['qty', 'q-ty', 'quantity', 'số lượng']):
+                        _primary_qty = qidx
+                        break
+                if _primary_qty is None:
+                    _primary_qty = qty_cols[0]  # fallback: keep first
+                # Unmap all other qty columns
+                for qidx in qty_cols:
+                    if qidx != _primary_qty:
+                        del header_map[qidx]
             
             # Extract embedded unit from column headers like "Quantity. (MT)", "Unit Price. (USD/MT)"
             _header_unit = None
@@ -533,7 +552,22 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
                         else:
                              item.unit = val
                     elif field == "qty": item.quantity = parse_quantity(val)
-                    elif field == "price": item.unitPrice = safe_parse_float(val)
+                    elif field == "price":
+                        # Price-aware parsing: values like "2.044" (USD/MTR) should be
+                        # treated as decimal $2.044, NOT thousand-separated 2044.
+                        # Heuristic: if the value has a single dot and the part before
+                        # the dot is a small number (< 100), treat dot as decimal.
+                        _pval = val.strip().lstrip('$€£¥')
+                        _price_dot_parts = _pval.split('.')
+                        if (len(_price_dot_parts) == 2 and
+                                _price_dot_parts[0].replace(',', '').isdigit() and
+                                _price_dot_parts[1].isdigit() and
+                                len(_price_dot_parts[1]) == 3 and
+                                int(_price_dot_parts[0].replace(',', '')) < 100):
+                            # Small number with .XXX → decimal, not thousand sep
+                            item.unitPrice = float(_pval.replace(',', ''))
+                        else:
+                            item.unitPrice = safe_parse_float(val)
                     elif field == "amount": item.amount = safe_parse_float(val)
                     elif field == "tax_rate": 
                         if not val and idx + 1 < len(cols) and "%" in cols[idx+1]:
