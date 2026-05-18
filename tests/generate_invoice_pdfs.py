@@ -323,11 +323,117 @@ class DomesticInvoicePDF(FPDF):
 
 
 # ═══════════════════════════════════════════════════════════════
+# BATCH 2 DATA  (completely different from batch 1)
+# ═══════════════════════════════════════════════════════════════
+
+INTL_DATA_2 = [
+    dict(seller="Tân Cảng Shipping Co., Ltd",
+         seller_addr="35 Nguyen Tat Thanh, District 4, Ho Chi Minh City, Vietnam",
+         buyer="Maple Leaf Trading Corp",
+         buyer_addr="350 Bay Street, Suite 1200, Toronto, ON M5H 2S6, Canada",
+         inv_no="TCS-2025-0412", inv_date="1/20/2025",
+         product="Black Pepper Whole 500GL", qty="68,000", unit_price="CAD 4.50", unit="kg",
+         price="CAD 306,000", subtotal="CAD 306,000", tax_rate="0%",
+         tax="CAD 0", total="CAD 306,000", delivery="CIF"),
+    dict(seller="Phú Mỹ Steel Corporation",
+         seller_addr="KCN Phú Mỹ 1, Tân Thành, Bà Rịa - Vũng Tàu, Vietnam",
+         buyer="Al Rajhi Construction Materials LLC",
+         buyer_addr="King Fahd Road, P.O. Box 28, Riyadh 11411, Saudi Arabia",
+         inv_no="PMS-INV-88034", inv_date="7/12/2025",
+         product="Hot Rolled Steel Coil Q235B", qty="2,500", unit_price="USD 485.00", unit="MT",
+         price="USD 1,212,500", subtotal="USD 1,212,500", tax_rate="0%",
+         tax="USD 0", total="USD 1,212,500", delivery="FOB"),
+    dict(seller="Hạ Long Aquaculture JSC",
+         seller_addr="Lot A5, Cai Lan Industrial Zone, Quang Ninh, Vietnam",
+         buyer="Oceanic Fresh Foods Pty Ltd",
+         buyer_addr="Unit 7, 42 Wharf Road, Port Adelaide, SA 5015, Australia",
+         inv_no="HLA-2025-0256", inv_date="3/8/2025",
+         product="Frozen Black Tiger Shrimp HOSO", qty="18,200", unit_price="AUD 12.80", unit="kg",
+         price="AUD 232,960", subtotal="AUD 232,960", tax_rate="0%",
+         tax="AUD 0", total="AUD 232,960", delivery="CFR"),
+    dict(seller="Vinacafé Biên Hòa Export",
+         seller_addr="2 Ngô Quyền, TP Biên Hòa, Đồng Nai, Vietnam",
+         buyer="Zürich Kaffee Import AG",
+         buyer_addr="Bahnhofstrasse 78, 8001 Zürich, Switzerland",
+         inv_no="VCB-EXP-25071", inv_date="4/22/2025",
+         product="Arabica Green Coffee Beans Grade 1", qty="36,000", unit_price="CHF 5.20", unit="kg",
+         price="CHF 187,200", subtotal="CHF 187,200", tax_rate="0%",
+         tax="CHF 0", total="CHF 187,200", delivery="CIF"),
+    dict(seller="Trường Hải Auto Corporation (THACO)",
+         seller_addr="19 Đại lộ Hùng Vương, Tam Kỳ, Quảng Nam, Vietnam",
+         buyer="Metro Motors Distribution Ltd",
+         buyer_addr="15 Ortigas Avenue, Pasig City, Metro Manila 1605, Philippines",
+         inv_no="THACO-CI-250601", inv_date="6/1/2025",
+         product="CKD Automotive Parts Kit - KIA K3", qty="120", unit_price="USD 3,850.00", unit="set",
+         price="USD 462,000", subtotal="USD 462,000", tax_rate="0%",
+         tax="USD 0", total="USD 462,000", delivery="FOB"),
+]
+
+DOMESTIC_DATA_2 = [
+    dict(seller="Công Ty TNHH Dược Phẩm Hà Thành",
+         seller_addr="158 Thái Hà, Quận Đống Đa, Hà Nội, Việt Nam",
+         seller_tax="0106789012",
+         serial="001", inv_no="28456", inv_date="18/05/2025",
+         buyer="Bệnh Viện Đa Khoa Quốc Tế Vinmec",
+         buyer_addr="458 Minh Khai, Quận Hai Bà Trưng, Hà Nội, Việt Nam",
+         buyer_tax="0109012345",
+         product="Thuốc kháng sinh Amoxicillin 500mg", unit="hộp", qty="2.000",
+         unit_price="85.000", amount="170.000.000",
+         tax_rate="5%", tax="8.500.000", total="178.500.000"),
+    dict(seller="Công Ty CP Sơn Tổng Hợp Á Đông",
+         seller_addr="Lô B12, KCN Tiên Sơn, Từ Sơn, Bắc Ninh, Việt Nam",
+         seller_tax="2300456789",
+         serial="003", inv_no="15782", inv_date="02/04/2025",
+         buyer="Công Ty TNHH Trang Trí Nội Thất Hoàng Gia",
+         buyer_addr="92 Cách Mạng Tháng 8, Quận 3, TP Hồ Chí Minh, Việt Nam",
+         buyer_tax="0311234567",
+         product="Sơn nội thất cao cấp Dulux 18L", unit="thùng", qty="350",
+         unit_price="1.250.000", amount="437.500.000",
+         tax_rate="10%", tax="43.750.000", total="481.250.000"),
+    dict(seller="Công Ty TNHH Thép Không Gỉ Đại Việt",
+         seller_addr="KCN Nhơn Trạch 2, Đồng Nai, Việt Nam",
+         seller_tax="3602345678",
+         serial="002", inv_no="90134", inv_date="25/02/2025",
+         buyer="Công Ty CP Cơ Khí Chính Xác Bách Khoa",
+         buyer_addr="27 Cổ Nhuế, Quận Bắc Từ Liêm, Hà Nội, Việt Nam",
+         buyer_tax="0107890123",
+         product="Thép tấm inox SUS304 2mm", unit="tấm", qty="500",
+         unit_price="2.400.000", amount="1.200.000.000",
+         tax_rate="10%", tax="120.000.000", total="1.320.000.000"),
+    dict(seller="Công Ty CP Giấy Sài Gòn",
+         seller_addr="Lô C3, KCN Mỹ Xuân A, Bà Rịa - Vũng Tàu, Việt Nam",
+         seller_tax="3500567891",
+         serial="006", inv_no="44209", inv_date="10/06/2025",
+         buyer="Nhà Xuất Bản Giáo Dục Việt Nam",
+         buyer_addr="81 Trần Hưng Đạo, Quận Hoàn Kiếm, Hà Nội, Việt Nam",
+         buyer_tax="0100107518",
+         product="Giấy in offset 80gsm A4", unit="ream", qty="20.000",
+         unit_price="68.000", amount="1.360.000.000",
+         tax_rate="10%", tax="136.000.000", total="1.496.000.000"),
+    dict(seller="Công Ty TNHH Thiết Bị Y Tế Nam Anh",
+         seller_addr="45 Bùi Thị Xuân, Quận 1, TP Hồ Chí Minh, Việt Nam",
+         seller_tax="0314567890",
+         serial="001", inv_no="67823", inv_date="30/03/2025",
+         buyer="Sở Y Tế Thành Phố Đà Nẵng",
+         buyer_addr="103 Quang Trung, Quận Hải Châu, Đà Nẵng, Việt Nam",
+         buyer_tax="0401234567",
+         product="Máy đo huyết áp điện tử Omron HEM-7156", unit="cái", qty="120",
+         unit_price="1.890.000", amount="226.800.000",
+         tax_rate="5%", tax="11.340.000", total="238.140.000"),
+]
+
+
+# ═══════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════
 
 def main():
-    print("Generating International Invoice PDFs (AGB_14166 format)...")
+    # ── Batch 1 (variants 1-5) ──
+    print("═" * 60)
+    print("BATCH 1: Generating variants 1-5")
+    print("═" * 60)
+
+    print("\nInternational Invoice PDFs (AGB_14166 format)...")
     for i, data in enumerate(INTL_DATA, 1):
         pdf = InternationalInvoicePDF(data)
         pdf.build()
@@ -335,7 +441,7 @@ def main():
         pdf.output(path)
         print(f"  ✅ {path}")
 
-    print("\nGenerating Domestic GTGT Invoice PDFs (AGB_12487 format)...")
+    print("\nDomestic GTGT Invoice PDFs (AGB_12487 format)...")
     for i, data in enumerate(DOMESTIC_DATA, 1):
         pdf = DomesticInvoicePDF(data)
         pdf.build()
@@ -343,7 +449,28 @@ def main():
         pdf.output(path)
         print(f"  ✅ {path}")
 
-    print(f"\n🎉 Done! All 10 PDFs saved to: {OUT_DIR}")
+    # ── Batch 2 (variants 6-10) ──
+    print(f"\n{'═' * 60}")
+    print("BATCH 2: Generating variants 6-10")
+    print("═" * 60)
+
+    print("\nInternational Invoice PDFs (AGB_14166 format)...")
+    for i, data in enumerate(INTL_DATA_2, 6):
+        pdf = InternationalInvoicePDF(data)
+        pdf.build()
+        path = os.path.join(OUT_DIR, f"AGB_14166_variant_{i}.pdf")
+        pdf.output(path)
+        print(f"  ✅ {path}")
+
+    print("\nDomestic GTGT Invoice PDFs (AGB_12487 format)...")
+    for i, data in enumerate(DOMESTIC_DATA_2, 6):
+        pdf = DomesticInvoicePDF(data)
+        pdf.build()
+        path = os.path.join(OUT_DIR, f"AGB_12487_variant_{i}.pdf")
+        pdf.output(path)
+        print(f"  ✅ {path}")
+
+    print(f"\n🎉 Done! All 20 PDFs saved to: {OUT_DIR}")
 
 
 if __name__ == "__main__":
