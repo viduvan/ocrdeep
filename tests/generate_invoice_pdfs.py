@@ -64,8 +64,8 @@ DOMESTIC_DATA = [
     dict(seller="Công Ty TNHH Thương Mại Bình Minh",
          seller_addr="25 Lý Thường Kiệt, Quận Hoàn Kiếm, Hà Nội, Việt Nam",
          seller_tax="0101567890",
-         serial="002", inv_no="10245", inv_date="12/05/2025",
-         buyer="Công Ty CP Phát Triển Số Việt",
+         serial="1C25TAA", inv_no="10245", inv_date="12/05/2025",
+         buyer="Công Ty TNHH Phát Triển Số Việt",
          buyer_addr="78 Nguyễn Trãi, Quận Thanh Xuân, Hà Nội, Việt Nam",
          buyer_tax="0108234567",
          product="Máy in laser HP LaserJet Pro", unit="cái", qty="15",
@@ -74,7 +74,7 @@ DOMESTIC_DATA = [
     dict(seller="Công Ty CP Vật Liệu Xây Dựng Đông Á",
          seller_addr="112 Trần Đại Nghĩa, Quận Hai Bà Trưng, Hà Nội, Việt Nam",
          seller_tax="0102345678",
-         serial="003", inv_no="87623", inv_date="08/04/2025",
+         serial="1C25TTD", inv_no="87623", inv_date="08/04/2025",
          buyer="Công Ty TNHH Xây Dựng Hòa Phát",
          buyer_addr="56 Phạm Văn Đồng, Quận Bắc Từ Liêm, Hà Nội, Việt Nam",
          buyer_tax="0109876543",
@@ -84,8 +84,8 @@ DOMESTIC_DATA = [
     dict(seller="Công Ty TNHH Điện Tử Sao Việt",
          seller_addr="34 Lê Văn Lương, Quận Cầu Giấy, Hà Nội, Việt Nam",
          seller_tax="0103456789",
-         serial="001", inv_no="45890", inv_date="20/03/2025",
-         buyer="Công Ty CP Giải Pháp Công Nghệ FTS",
+         serial="1C25THO", inv_no="45890", inv_date="20/03/2025",
+         buyer="Công Ty TNHH Giải Pháp Công Nghệ FTS",
          buyer_addr="99 Hoàng Quốc Việt, Quận Cầu Giấy, Hà Nội, Việt Nam",
          buyer_tax="0107654321",
          product="Bộ lưu điện UPS APC 3000VA", unit="bộ", qty="8",
@@ -94,7 +94,7 @@ DOMESTIC_DATA = [
     dict(seller="Công Ty CP Thực Phẩm Hương Quê",
          seller_addr="67 Ngô Quyền, Quận Hai Bà Trưng, Hà Nội, Việt Nam",
          seller_tax="0104567891",
-         serial="004", inv_no="33401", inv_date="01/06/2025",
+         serial="1C25MDT", inv_no="33401", inv_date="01/06/2025",
          buyer="Siêu Thị Mega Market Việt Nam",
          buyer_addr="162 Lê Duẩn, Quận 1, TP Hồ Chí Minh, Việt Nam",
          buyer_tax="0312987654",
@@ -104,7 +104,7 @@ DOMESTIC_DATA = [
     dict(seller="Công Ty TNHH Nội Thất Phú Quý",
          seller_addr="210 Giải Phóng, Quận Đống Đa, Hà Nội, Việt Nam",
          seller_tax="0105678912",
-         serial="005", inv_no="72018", inv_date="15/01/2025",
+         serial="1C25TLT", inv_no="72018", inv_date="15/01/2025",
          buyer="Khách Sạn Mường Thanh Grand Hà Nội",
          buyer_addr="4 Lý Thái Tổ, Quận Hoàn Kiếm, Hà Nội, Việt Nam",
          buyer_tax="0106543210",
@@ -122,7 +122,7 @@ class InternationalInvoicePDF(FPDF):
     """Generates International Invoice matching AGB_14166 format."""
 
     def __init__(self, data):
-        super().__init__()
+        super().__init__(format=(210, 220))
         self.d = data
         self.add_font("DejaVu", "", FONT_REGULAR)
         self.add_font("DejaVu", "B", FONT_BOLD)
@@ -223,7 +223,7 @@ class DomesticInvoicePDF(FPDF):
     """Generates Vietnamese GTGT Invoice matching AGB_12487 format."""
 
     def __init__(self, data):
-        super().__init__()
+        super().__init__(format=(210, 150))
         self.d = data
         self.add_font("DejaVu", "", FONT_REGULAR)
         self.add_font("DejaVu", "B", FONT_BOLD)
@@ -255,23 +255,20 @@ class DomesticInvoicePDF(FPDF):
         # ── Buyer info ──
         self.set_font("DejaVu", "", 9)
         fields = [
-            ("Mã cửa hàng:", ""),
-            ("Tên người mua hàng:", d["buyer"]),
-            ("Tên đơn vị:", ""),
+            ("Người mua hàng: ", d["buyer"]),
             ("Mã số thuế:", d["buyer_tax"]),
             ("Địa chỉ:", d["buyer_addr"]),
-            ("Số CCCD:", ""),
         ]
         for label, val in fields:
             self.set_font("DejaVu", "", 9)
-            self.cell(45, 5, label)
+            self.cell(26, 5, label)
             self.set_font("DejaVu", "B" if val else "", 9)
             self.cell(0, 5, val, new_x="LMARGIN", new_y="NEXT")
         self.ln(5)
 
         # ── Item table ──
         col_w = [10, 42, 15, 16, 25, 28, 12, 22, 25]
-        headers = ["STT", "Tên hàng hóa", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền", "Thuế\nsuất", "Thuế\nGTGT", "Tổng tiền\nsau thuế"]
+        headers = ["STT", "Tên hàng hóa", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền(VND)", "Thuế\nsuất", "Thuế\nGTGT", "Tổng tiền\nsau thuế"]
         self.set_font("DejaVu", "B", 7)
         self.set_fill_color(230, 230, 230)
         for i, h in enumerate(headers):
@@ -286,40 +283,17 @@ class DomesticInvoicePDF(FPDF):
 
         # ── Cộng ──
         self.set_font("DejaVu", "B", 9)
-        self.cell(45, 6, "Cộng")
+        self.cell(45, 6, "Tổng tiền: ")
         self.set_x(170)
         self.cell(0, 6, d["total"], align="R", new_x="LMARGIN", new_y="NEXT")
         self.set_font("DejaVu", "", 9)
         self.cell(0, 6, "Bằng chữ:", new_x="LMARGIN", new_y="NEXT")
         self.ln(8)
 
-        # ── Tax summary table ──
-        self.set_font("DejaVu", "B", 8)
-        self.set_fill_color(230, 230, 230)
-        sum_w = [60, 40, 40, 50]
-        sum_h = ["Tổng hợp", "Số tiền", "Thuế GTGT", "Thành tiền đã có thuế GTGT"]
-        for i, h in enumerate(sum_h):
-            self.cell(sum_w[i], 7, h, border=1, fill=True, align="C")
-        self.ln()
-
-        self.set_font("DejaVu", "", 8)
-        tax_rows = [
-            ("Tổng tiền không chịu thuế", "", "", ""),
-            ("Tổng tiền chịu thuế suất 0%", "", "", ""),
-            ("Tổng tiền chịu thuế suất 5%", "", "", ""),
-            ("Tổng tiền chịu thuế suất 8%", "", "", ""),
-            (f"Tổng tiền chịu thuế suất {d['tax_rate']}", d["amount"], d["tax"], d["total"]),
-        ]
-        for row in tax_rows:
-            for i, v in enumerate(row):
-                self.cell(sum_w[i], 6, v, border=1, align="C" if i > 0 else "L")
-            self.ln()
         self.ln(15)
 
-        # ── Signatures ──
-        self.set_font("DejaVu", "B", 10)
-        self.cell(95, 7, "Người mua hàng", align="C")
-        self.cell(95, 7, "Người bán hàng", align="C")
+
+
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -449,28 +423,8 @@ def main():
         pdf.output(path)
         print(f"  ✅ {path}")
 
-    # ── Batch 2 (variants 6-10) ──
-    print(f"\n{'═' * 60}")
-    print("BATCH 2: Generating variants 6-10")
-    print("═" * 60)
+    print(f"\n🎉 Done! All 10 PDFs saved to: {OUT_DIR}")
 
-    print("\nInternational Invoice PDFs (AGB_14166 format)...")
-    for i, data in enumerate(INTL_DATA_2, 6):
-        pdf = InternationalInvoicePDF(data)
-        pdf.build()
-        path = os.path.join(OUT_DIR, f"AGB_14166_variant_{i}.pdf")
-        pdf.output(path)
-        print(f"  ✅ {path}")
-
-    print("\nDomestic GTGT Invoice PDFs (AGB_12487 format)...")
-    for i, data in enumerate(DOMESTIC_DATA_2, 6):
-        pdf = DomesticInvoicePDF(data)
-        pdf.build()
-        path = os.path.join(OUT_DIR, f"AGB_12487_variant_{i}.pdf")
-        pdf.output(path)
-        print(f"  ✅ {path}")
-
-    print(f"\n🎉 Done! All 20 PDFs saved to: {OUT_DIR}")
 
 
 if __name__ == "__main__":
