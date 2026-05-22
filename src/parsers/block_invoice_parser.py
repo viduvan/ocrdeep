@@ -401,7 +401,7 @@ SELLER_LABEL_KEYS = {
 BUYER_LABEL_KEYS = {
     "buyerName": ["tên đơn vị mua", "đơn vị mua", "buyer", "cusname", "tên đơn vị",
                   "company's name", "the buyer", "đơn vị (co. name)", "co. name",
-                  "bên b (bên mua)", "bên mua", "bên b",
+                  "bên b (bên mua)", "bên mua", "bên b", "người mua",
                   # EN Commercial Invoice labels
                   "consignee", "consigned to", "sold to", "bill to",
                   "ship to", "importer", "importer name",
@@ -1235,6 +1235,7 @@ def parse_buyer(block: List[str], invoice: Invoice):
             "tên người mua hàng",  # Added
             "người mua hàng",      # Added
             "họ tên người mua hàng",
+            "người mua",           # Added
             "khách hàng",
             "company's name",
             "đơn vị (co. name)",
@@ -1292,8 +1293,10 @@ def parse_buyer(block: List[str], invoice: Invoice):
             # Skip if value contains CCCD marker or is empty/junk
             if value and "cccd" not in value.lower() and "(citizen id" not in value.lower():
                 if len(value) > 3 and not re.match(r'^[\*\s]+$', value):
-                    invoice.buyerName = value
-                    pending_field = None  # Clear: name is set
+                    # Reject signature labels or values containing signature instructions
+                    if not any(sig in value.lower() for sig in ["ký, ghi rõ", "ký tên", "người bán", "ký bởi", "signed"]):
+                        invoice.buyerName = value
+                        pending_field = None  # Clear: name is set
             else:
                 pending_field = "buyerName"
             matched = True
@@ -2811,13 +2814,13 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
             if val and len(val) > 3:
                 invoice.buyerName = val
         
-        # Pattern 2: "Họ tên người mua hàng:", "Người mua hàng:", "Tên người mua:"
+        # Pattern 2: "Họ tên người mua hàng:", "Người mua hàng:", "Tên người mua:", "Người mua:"
         if not invoice.buyerName:
-            m = re.search(r'(?:[Hh]ọ\s*tên\s*người\s*mua|[Nn]gười\s*mua\s*hàng|[Tt]ên\s*người\s*mua|[Bb]uyer)[^:]*:\s*([^\n]+)', raw_text)
+            m = re.search(r'(?:[Hh]ọ\s*tên\s*người\s*mua|[Nn]gười\s*mua(?:\s*hàng)?|[Tt]ên\s*người\s*mua|[Bb]uyer)[^:]*:\s*([^\n]+)', raw_text)
             if m:
                 val = m.group(1).strip().strip('*')
                 if val and len(val) > 3 and not re.match(r'^\*+$', val):
-                    if not any(sig in val.lower() for sig in ['ký bởi', 'signed', 'signature', 'người bán']):
+                    if not any(sig in val.lower() for sig in ['ký bởi', 'signed', 'signature', 'người bán', 'người mua hàng', 'ký,', 'họ tên']):
                         invoice.buyerName = val
         
         # Pattern 3: "Đơn vị mua hàng:" hoặc "Khách hàng:"
