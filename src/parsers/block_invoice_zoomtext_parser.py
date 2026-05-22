@@ -620,7 +620,7 @@ def _parse_en_buyer(lines: List[str], invoice: Invoice) -> None:
         # VN: Tên người mua hàng: <name> OR Tên đơn vị: <name>
         # ZOOM TEXT is authoritative — always overwrite buyerName if we have explicit label
         if any(k in low for k in ["tên người mua hàng", "họ tên người mua",
-                                   "tên đơn vị", "khách hàng:", "người mua"]):
+                                   "tên đơn vị", "khách hàng:", "người mua:"]):
             val = clean.split(":", 1)[-1].strip() if ":" in clean else ""
             if val:  # Always overwrite — explicit label is more reliable than continuation guesses
                 invoice.buyerName = val
