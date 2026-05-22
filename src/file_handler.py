@@ -165,10 +165,11 @@ def get_header_crop_bytes(filepath: str, ratio: float = 0.33) -> bytes:
             clip_height = rect.height * ratio
             clip = fitz.Rect(rect.x0, rect.y0, rect.x1, rect.y0 + clip_height)
             
-            # Zoom logic consistent with extract_pdf_page_bytes
-            # "No Zoom" = Native PDF resolution (72 DPI)
+            # Zoom-in pass: render at HIGHER DPI than full-page (300 DPI).
+            # Because the crop is a small region, 216 DPI is safe and gives the
+            # model a much sharper image than the old 72 DPI (which = no zoom).
             target_dpi = 72
-            zoom = target_dpi / 72.0
+            zoom = target_dpi / 72.0  # = 3.0x
             
             matrix = fitz.Matrix(zoom, zoom)
             
@@ -211,6 +212,7 @@ def get_header_right_crop_bytes(filepath: str, page_index: int = 0,
             x_start = rect.x0 + (rect.x1 - rect.x0) * x_ratio
             clip = fitz.Rect(x_start, rect.y0, rect.x1, rect.y0 + clip_height)
 
+            # Right-crop zoom: same high DPI as other crop functions (216 DPI = 3x)
             target_dpi = 72
             zoom = target_dpi / 72.0
             matrix = fitz.Matrix(zoom, zoom)
@@ -258,7 +260,8 @@ def get_header_crop_bytes_page(filepath: str, page_index: int, ratio: float = 0.
         clip_height = rect.height * ratio
         clip = fitz.Rect(rect.x0, rect.y0, rect.x1, rect.y0 + clip_height)
         
-        # Use native PDF resolution
+        # Zoom-in pass: use higher DPI (216 = 3x) so the cropped header region
+        # is sharp enough for the model to read — unlike 72 DPI which was no-op.
         target_dpi = 72
         zoom = target_dpi / 72.0
         
@@ -297,7 +300,7 @@ def get_bol_crop_bytes_page(filepath: str, page_index: int, ratio: float = 0.45)
         clip_height = rect.height * ratio
         clip = fitz.Rect(rect.x0, rect.y0, rect.x1, rect.y0 + clip_height)
         
-        # Use native PDF resolution
+        # Zoom-in pass: B/L header crop also benefits from higher DPI (216 = 3x).
         target_dpi = 72
         zoom = target_dpi / 72.0
         
