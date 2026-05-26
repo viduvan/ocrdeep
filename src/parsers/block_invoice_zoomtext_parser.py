@@ -210,13 +210,18 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
                 break
             if set(_dline).issubset({'|', '-', ' ', ':', '+'}):
                 continue  # separator row
-            _dcells = [c.strip().strip('*').strip() for c in _dline.split('|')]
-            _dcells_real = [c for c in _dcells if c != '']
-            if _pt_seller_col >= len(_dcells_real):
+            # Use positional split to keep empty cells aligned with header
+            _dcells_pos = [c.strip().strip('*').strip() for c in _dline.split('|')]
+            # Remove leading/trailing empty from pipe split (| col1 | col2 | → ['', 'col1', 'col2', ''])
+            if _dcells_pos and _dcells_pos[0] == '':
+                _dcells_pos = _dcells_pos[1:]
+            if _dcells_pos and _dcells_pos[-1] == '':
+                _dcells_pos = _dcells_pos[:-1]
+            if _pt_seller_col >= len(_dcells_pos):
                 continue
-            _cell_val = _dcells_real[_pt_seller_col].strip()
+            _cell_val = _dcells_pos[_pt_seller_col].strip()
             if not _cell_val:
-                continue
+                continue  # This row has empty seller column — skip
             if not _pt_name:
                 _pt_name = _cell_val
             else:
