@@ -40,6 +40,7 @@ def _detect_zoom_blocks(lines: List[str]):
 
     SELLER_TRIGGERS = [
         "the seller:", "seller:", "shipper:", "shipper name", "beneficiary:",
+        "beneficiary name",  # Case 73: "## Beneficiary Name and Address" (no colon)
         "đơn vị bán hàng", "đơn vị bán", "bên a", "bên bán",
         "người bán",  # Case 171: "Người bán: Tan TinCay Partners"
         # EN Commercial Invoice
@@ -176,6 +177,57 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
     Parse seller block từ zoom text.
     Hỗ trợ cả EN (THE SELLER:) và VN (unlabeled first-line company name).
     """
+    # ── Pre-scan: extract seller from pipe-table columns ────────────────
+    # Handles: | Beneficiary Name and Address | INVOICE NO. | DATE |
+    #          | COMPANY NAME                 | CTT-123     | 10/05/2026 |
+    #          | Address line                 | CONTRACT NO. | TERMS |
+    _pt_header_idx = None
+    _pt_seller_col = None
+    for _pi, _pline in enumerate(lines):
+        _ps = _pline.strip()
+        if not _ps.startswith('|'):
+            continue
+        _pcells = [c.strip().strip('*').strip() for c in _ps.split('|')]
+        _pcells_real = [c for c in _pcells if c != '']
+        if len(_pcells_real) < 2:
+            continue
+        # Check if this is a header row with seller-related column
+        _seller_col_kws = ['beneficiary', 'shipper', 'exporter', 'seller', 'sender']
+        for _ci, _col in enumerate(_pcells_real):
+            if any(k in _col.lower() for k in _seller_col_kws):
+                _pt_header_idx = _pi
+                _pt_seller_col = _ci
+                break
+        if _pt_header_idx is not None:
+            break
+
+    if _pt_header_idx is not None and _pt_seller_col is not None:
+        _pt_name = None
+        _pt_addr_parts = []
+        for _di in range(_pt_header_idx + 1, len(lines)):
+            _dline = lines[_di].strip()
+            if not _dline.startswith('|'):
+                break
+            if set(_dline).issubset({'|', '-', ' ', ':', '+'}):
+                continue  # separator row
+            _dcells = [c.strip().strip('*').strip() for c in _dline.split('|')]
+            _dcells_real = [c for c in _dcells if c != '']
+            if _pt_seller_col >= len(_dcells_real):
+                continue
+            _cell_val = _dcells_real[_pt_seller_col].strip()
+            if not _cell_val:
+                continue
+            if not _pt_name:
+                _pt_name = _cell_val
+            else:
+                # Subsequent rows in same column = address
+                _pt_addr_parts.append(_cell_val)
+        if _pt_name:
+            invoice.sellerName = _pt_name
+            if _pt_addr_parts:
+                invoice.sellerAddress = ', '.join(_pt_addr_parts)
+            return  # Pipe-table extraction is authoritative
+
     first_line = True
     pending_seller_address = False  # When True: sellerName set, looking for address, skip name repeat
     _addr_done = False  # When True: seller address is complete, stop appending
@@ -262,7 +314,9 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
                            "shipper/exporter", "sender/exporter", "vendor/exporter",
                            "shipper name", "shipper", "exporter name",
                            "ship from", "exporter", "sender",
-                           "the seller", "from", "sold by"}
+                           "the seller", "from", "sold by",
+                           "beneficiary", "beneficiary name",
+                           "beneficiary name and address"}  # Case 73
         _clean_for_label = clean.lstrip('#').strip()
         _label_low = _clean_for_label.lower()
         if _label_low in _section_labels or any(_label_low.startswith(sl + " ") for sl in _section_labels if len(sl) > 2):
@@ -716,7 +770,9 @@ def _parse_en_buyer(lines: List[str], invoice: Invoice) -> None:
         # Unlabeled continuation: buyer has name but address not yet set or still building
         if invoice.buyerName and ":" not in clean and not _buyer_addr_done:
             skip_keywords = ["commercial invoice", "proforma", "inv.", "s/c", "payment",
-                             "invoice no", "invoice date", "date", "tracking"]
+                             "invoice no", "invoice date", "date", "tracking",
+                             "consignee", "notify party", "to the order of",
+                             "beneficiary", "shipper", "exporter"]
             # Handle pipe-table lines: extract cell content
             _cont_val = clean
             _from_pipe = False
@@ -799,6 +855,68 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
         'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12',
     }
 
+    # ── Pre-scan: extract invoice ID/date from pipe-table columns ────────
+    # Handles tables like: | Beneficiary | INVOICE NO. | DATE |
+    #                      | Company     | CTT-123     | 10/05/2026 |
+    _pipe_header_idx = None
+    _pipe_cols = []
+    for _pi, _pline in enumerate(lines):
+        _ps = _pline.strip()
+        if not _ps.startswith('|'):
+            continue
+        _pcells = [c.strip().strip('*').strip() for c in _ps.split('|')]
+        _pcells = [c for c in _pcells if c is not None]
+        _real = [c for c in _pcells if c != '']
+        if len(_real) < 2:
+            continue
+        # Check if this is a header row with "INVOICE NO" or "Invoice No"
+        _has_inv_col = any(re.search(r'(?:invoice\s*no|inv\s*no)', c, re.I) for c in _real)
+        if _has_inv_col:
+            _pipe_header_idx = _pi
+            _pipe_cols = _real
+            break
+
+    if _pipe_header_idx is not None and _pipe_cols:
+        # Find column indices for INVOICE NO and DATE
+        _inv_col_idx = None
+        _date_col_idx = None
+        for _ci, _col in enumerate(_pipe_cols):
+            if re.search(r'(?:invoice\s*no|inv\s*no)', _col, re.I):
+                _inv_col_idx = _ci
+            elif re.match(r'^date$', _col.strip(), re.I):
+                _date_col_idx = _ci
+        # Look at subsequent data rows (skip separator rows)
+        for _di in range(_pipe_header_idx + 1, len(lines)):
+            _dline = lines[_di].strip()
+            if not _dline.startswith('|'):
+                break
+            if set(_dline).issubset({'|', '-', ' ', ':', '+'}):
+                continue  # separator row
+            _dcells = [c.strip().strip('*').strip() for c in _dline.split('|')]
+            _dcells = [c for c in _dcells if c is not None]
+            _dreal = [c for c in _dcells if c != '']
+            if len(_dreal) < 2:
+                continue
+            # Extract invoice ID from the corresponding column
+            if _inv_col_idx is not None and _inv_col_idx < len(_dreal):
+                _id_candidate = _dreal[_inv_col_idx].strip()
+                if _id_candidate and not invoice.invoiceID and len(_id_candidate) >= 3:
+                    # Verify it looks like an ID (has digits or hyphens, not a label)
+                    _id_label_words = {'date', 'terms', 'contract', 'amount', 'total',
+                                       'description', 'quantity', 'payment', 'currency',
+                                       'contract no', 'contract no.'}
+                    if (_id_candidate.lower() not in _id_label_words
+                            and re.search(r'[0-9\-/]', _id_candidate)):
+                        invoice.invoiceID = _id_candidate
+            # Extract date from the DATE column
+            if _date_col_idx is not None and _date_col_idx < len(_dreal):
+                _date_candidate = _dreal[_date_col_idx].strip()
+                if _date_candidate and not invoice.invoiceDate:
+                    if re.match(r'^\d{1,2}[/\.\-]\d{1,2}[/\.\-]\d{2,4}$', _date_candidate):
+                        invoice.invoiceDate = _date_candidate
+            if invoice.invoiceID:
+                break  # Got what we need from first data row
+
     _pending_invoice_id = False
     _pending_payment_method = False
     for line in lines:
@@ -815,8 +933,13 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
                 clean, re.I
             )
             if m:
-                invoice.invoiceID = m.group(1).strip()
-                _pending_invoice_id = False
+                _id_val = m.group(1).strip()
+                # Reject common header label words captured by regex (Case 72: "INVOICE NO.    DATE")
+                _id_label_words = {'date', 'terms', 'contract', 'amount', 'total', 'description',
+                                   'quantity', 'payment', 'currency', 'remarks', 'notes'}
+                if _id_val.lower() not in _id_label_words:
+                    invoice.invoiceID = _id_val
+                    _pending_invoice_id = False
             # Pattern: "Nº: JW-202609001-1" or "N°: XXX" (European/intl format)
             if not invoice.invoiceID:
                 m_no = re.search(r'(?:N[ºo°]|No\.)\s*:\s*([A-Za-z0-9][\w\-/]+)', clean)
@@ -843,6 +966,12 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
         # Pending invoice ID: next non-empty line with digits is the ID
         if _pending_invoice_id and not invoice.invoiceID:
             val = clean.strip()
+            # Reject common header label words that are not actual IDs (Case 73: "DATE" after "INVOICE NO.")
+            _label_words = {'date', 'terms', 'contract', 'amount', 'total', 'description',
+                            'quantity', 'payment', 'currency', 'remarks', 'notes',
+                            'beneficiary', 'consignee', 'shipper', 'exporter', 'importer'}
+            if val and val.lower() in _label_words:
+                continue  # Skip label word but keep _pending_invoice_id = True for next line
             if val and re.match(r'^#?[A-Za-z0-9][\w\-/]*$', val) and len(val) >= 1:
                 invoice.invoiceID = val
                 _pending_invoice_id = False
@@ -1129,9 +1258,21 @@ def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
         invoice.sellerAddress and invoice.sellerName and
         invoice.sellerAddress.rstrip('.').strip() == invoice.sellerName.rstrip('.').strip()
     )
-    if not invoice.sellerName or not invoice.sellerAddress or _seller_addr_is_name:
-        if _seller_addr_is_name:
-            # Clear the wrong address so _parse_en_seller can set the correct one
+    # Detect if sellerName is actually a section label, not a real company name (Case 73)
+    _seller_name_is_label = False
+    if invoice.sellerName:
+        _sn_low = invoice.sellerName.lower().strip()
+        _section_label_patterns = [
+            'beneficiary name', 'beneficiary', 'shipper/exporter', 'shipper name',
+            'exporter name', 'sender name', 'seller name', 'the seller',
+            'billed from', 'bill from', 'ship from', 'sold by',
+        ]
+        if any(_sn_low == p or _sn_low.startswith(p + ' ') for p in _section_label_patterns):
+            _seller_name_is_label = True
+    if not invoice.sellerName or not invoice.sellerAddress or _seller_addr_is_name or _seller_name_is_label:
+        if _seller_addr_is_name or _seller_name_is_label:
+            # Clear wrong data so _parse_en_seller can set the correct values
+            invoice.sellerName = None
             invoice.sellerAddress = None
         _parse_en_seller(seller_lines, invoice)
 
