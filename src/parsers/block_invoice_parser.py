@@ -891,7 +891,11 @@ def parse_header(block: List[str], invoice: Invoice):
                 if not _is_instruction:
                     m = re.search(r"(?<!PROFORMA )(?:Invoice\s*No\.?|Invoice\s*Number)[:\s]*\*{0,2}\s*([A-Za-z0-9][\w\-/]*)\*{0,2}", line, re.I)
                     if m and len(m.group(1)) >= 2:
-                        invoice.invoiceID = m.group(1)
+                        # Reject common header label words (Case 72: "INVOICE NO.    DATE")
+                        _id_label_reject = {'date', 'terms', 'contract', 'amount', 'total', 'description',
+                                            'quantity', 'payment', 'currency', 'remarks', 'notes'}
+                        if m.group(1).lower() not in _id_label_reject:
+                            invoice.invoiceID = m.group(1)
                     elif m and len(m.group(1)) == 1:
                         # Single digit likely instruction number — next line has actual ID
                         invoice._pending_invoice_id = True
