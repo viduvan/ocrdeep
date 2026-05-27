@@ -151,6 +151,13 @@ class InvoiceValidator:
             if val and str(val) not in raw_text:
                 # Check case-insensitive match
                 if str(val).lower() not in raw_text.lower():
+                    # For tax codes, also try matching with spaces removed
+                    # (source may have "01 07 50 04 14" for "0107500414")
+                    if field.endswith("TaxCode"):
+                        clean_val = str(val).replace(" ", "").replace("-", "")
+                        raw_no_spaces = raw_text.replace(" ", "")
+                        if clean_val in raw_no_spaces:
+                            continue  # Found after space normalization
                     flags[f"{field}_not_in_source"] = (
                         f"Value '{val}' not found in raw text"
                     )
