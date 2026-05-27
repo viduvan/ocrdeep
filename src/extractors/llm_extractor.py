@@ -29,6 +29,7 @@ Your task is to extract structured data from OCR text of invoices and commercial
 CRITICAL RULES:
 1. Extract EXACT numbers, names, and text as they appear in the source. Do NOT calculate, estimate, or modify values.
 2. For invoice ID: Look for patterns like "No.", "No:", "Số:", "Invoice No", "Invoice Number", "Number:", "#", "INV.", "Invoice #"
+   - Clean the ID value: remove trailing punctuation marks like "!", ".", "," that may be OCR artifacts. E.g., "047!" → "047"
 3. For invoice name/title: Look for document title like "COMMERCIAL INVOICE", "INVOICE", "Proforma Invoice", "HÓA ĐƠN GIÁ TRỊ GIA TĂNG"
 4. For dates: Convert to YYYY-MM-DD format (ISO 8601). 
    - IMPORTANT: For numeric-only dates like "09/05/2025", assume DD/MM/YYYY format (international standard, NOT US MM/DD/YYYY) unless context clearly indicates otherwise.
@@ -52,22 +53,46 @@ CRITICAL RULES:
 15. For Vietnamese number format: dot (.) is thousand separator, comma (,) is decimal separator.
     - "4.463.014" → 4463014, "10.185,19" → 10185.19, "62.103.270" → 62103270
     - For European format: "3.050,00" → 3050.00
+    - CRITICAL for GTGT invoices: In the tax summary table, amounts like "3.848,00" in the "Thành tiền trước thuế" column mean 3,848,000 (3 triệu 848 nghìn), NOT 3848.00.
+      The comma and digits after it are decimal places of the THOUSANDS value. Cross-check with "Số tiền viết bằng chữ" to verify.
+    - VND amounts are ALWAYS whole numbers (integers). If your calculation gives decimals for VND, you likely misread the number format.
 16. For invoiceTotalInWord: Look for "Số tiền viết bằng chữ", "Total amount in words", "In words", "SAY..."
     - Extract the FULL text as-is.
 17. taxPercent should be a string like "10%" or "8%". If GST/VAT is 0% or KCT, return "0%" or "KCT".
 18. sellerTaxCode/buyerTaxCode: "Mã số thuế", Tax identification numbers, VAT numbers, GST numbers, EORI numbers
+    - IMPORTANT: Use the "Mã số thuế" that appears NEAR the seller/buyer name section (typically lines 5-20 of invoice).
+    - Do NOT use MST from footer sections like "Đơn vị cung cấp hóa đơn điện tử" — that is the e-invoice platform provider, NOT the seller.
+    - Tax codes may have spaces ("01 07 50 04 14" → "0107500414"). Remove all spaces but KEEP hyphens (e.g., "0300942001-021" stays as-is, the hyphen separates main code from branch code).
 19. paymentMethod: Look for "Hình thức thanh toán", "Payment method", "T/T", "L/C", "TM/CK", "Chuyển khoản", "Tiền mặt".
     - Use the value from "Hình thức thanh toán" or "Terms of Payment" labels.
     - Do NOT confuse with "Terms of Sale" (like FOB, CIF, EXW) — those are shipping terms, not payment methods.
-20. For Vietnamese GTGT invoices specifically:
-    - The "Ký hiệu" field (e.g. "1C25TAA") contains BOTH the form number and serial combined:
-      * invoiceFormNo = first character = "1" (Mẫu số hóa đơn, indicates GTGT type)
-      * invoiceSerial = remaining characters = "C25TAA" (Ký hiệu hóa đơn)
-      * Examples: "1C25TAA" → formNo="1", serial="C25TAA". "1C25THO" → formNo="1", serial="C25THO". "1C25TTD" → formNo="1", serial="C25TTD". "1C24TMB" → formNo="1", serial="C24TMB"
-    - invoiceID = "Số" or "No." value (e.g., "00007675", "414", "00000160")
-    - "Mã CQT" or "Mã cơ quan thuế" or "MCQT" = Tax authority verification code. This is NOT invoiceFormNo or invoiceSerial. IGNORE it.
-    - invoiceDate = "Ngày ... tháng ... năm ..." — this is the official invoice date, NOT the signing date ("Ngày ký").
-    - sellerBank should be the bank NAME only (e.g., "Ngân hàng MSB - Chi nhánh Đống Đa"), NOT the account number.
+20. For Vietnamese GTGT invoices — invoiceSerial and invoiceFormNo:
+    There are TWO formats depending on the invoice age:
+    
+    A) NEW FORMAT (post-2021, e-invoices): "Ký hiệu" is a combined code like "1C25TAA", "1C25THO", "1K25TEF"
+       - invoiceFormNo = first character (always "1" for GTGT, "2" for bán hàng)
+       - invoiceSerial = remaining characters after the first digit
+       - Examples: "Ký hiệu: 1C25TAA" → formNo="1", serial="C25TAA"
+                   "Ký hiệu: 1C25THO" → formNo="1", serial="C25THO"
+                   "Ký hiệu: 1K25TEF" → formNo="1", serial="K25TEF"
+    
+    B) OLD FORMAT (pre-2021, paper invoices): "Mẫu số" and "Ký hiệu" are SEPARATE fields
+       - invoiceFormNo = "Mẫu số" value (e.g., "01GTKT0/001")
+       - invoiceSerial = "Ký hiệu" value (e.g., "AE/18E", "AA/19P")
+       - Examples: "Mẫu số: 01GTKT0/001", "Ký hiệu: AE/18E" → formNo="01GTKT0/001", serial="AE/18E"
+    
+    How to distinguish: If "Mẫu số:" label exists separately → use OLD format. Otherwise → use NEW format.
+    
+    - invoiceID = "Số" or "Số:" value (e.g., "00007675", "414", "047")
+    - "Mã CQT" or "Mã cơ quan thuế" or "MCQT" = Tax authority verification code. IGNORE it completely.
+    
+21. For Vietnamese GTGT invoices — invoiceDate:
+    - Priority 1: "Ngày X tháng Y năm Z" at the top of the invoice (official issue date)
+    - Priority 2: "Ký ngày: DD/MM/YYYY" or "Ký ngày: X tháng Y năm Z" (signing date, usually = issue date)
+    - Do NOT use: "Từ ngày/Đến ngày" (billing period), dates inside item descriptions (promotional dates), 
+      or dates from "Thay thế cho hóa đơn... ngày..." (replacement reference dates)
+    
+22. sellerBank should be the bank NAME only (e.g., "Ngân hàng MSB - Chi nhánh Đống Đa"), NOT the account number.
 
 Return a JSON object with these exact fields (use null for missing values):
 {
