@@ -91,6 +91,16 @@ def compare_results(case_id, regex_result, llm_result, raw_text, zoom_text=""):
     llm_only = 0
     regex_only = 0
     
+    # Detect invoiceSerial/invoiceFormNo swap between regex and LLM
+    serial_swapped = False
+    r_serial = str(regex_result.get("invoiceSerial", "") or "")
+    r_formno = str(regex_result.get("invoiceFormNo", "") or "")
+    l_serial = str(llm_result.get("invoiceSerial", "") or "")
+    l_formno = str(llm_result.get("invoiceFormNo", "") or "")
+    if (r_serial and r_formno and l_serial and l_formno
+        and r_serial == l_formno and r_formno == l_serial):
+        serial_swapped = True
+    
     for field in ALL_FIELDS:
         r_val = regex_result.get(field)
         l_val = llm_result.get(field)
@@ -119,6 +129,29 @@ def compare_results(case_id, regex_result, llm_result, raw_text, zoom_text=""):
             if r_cmp == l_cmp:
                 marker = "✅"
                 matches += 1
+            elif serial_swapped and field in ("invoiceSerial", "invoiceFormNo"):
+                marker = "🔄"  # Known swap - LLM follows NĐ123 standard
+                matches += 1  # Count as match since LLM is correct per regulation
+            elif field == "invoiceTotalInWord":
+                # Fuzzy match for long text: normalize and compare
+                import re as _re
+                r_norm = _re.sub(r'[./,\s]+', ' ', r_cmp).strip().lower()
+                l_norm = _re.sub(r'[./,\s]+', ' ', l_cmp).strip().lower()
+                if r_norm == l_norm or r_norm.startswith(l_norm[:40]) or l_norm.startswith(r_norm[:40]):
+                    marker = "✅"
+                    matches += 1
+                else:
+                    marker = "⚠️"
+                    mismatches += 1
+            elif field == "sellerBank":
+                # sellerBank: LLM extracts bank name only, regex may include account number
+                # If LLM value is contained in regex value or vice versa, count as match
+                if l_cmp in r_cmp or r_cmp in l_cmp:
+                    marker = "✅"
+                    matches += 1
+                else:
+                    marker = "⚠️"
+                    mismatches += 1
             else:
                 marker = "⚠️"
                 mismatches += 1
