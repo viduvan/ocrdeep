@@ -36,8 +36,16 @@ CRITICAL RULES:
    - Examples: "Feb 14, 2019" → "2019-02-14", "28-Oct-25" → "2025-10-28", "09/05/2025" → "2025-05-09", "20-Nov-2017" → "2017-11-20"
 5. For seller/exporter: Look for "Shipper", "Exporter", "Seller", "FROM", "Đơn vị bán hàng", "Người bán hàng", "Ship From", "THE SELLER", "Beneficiary"
 6. For buyer/importer: Look for "Consignee", "Importer", "Buyer", "TO", "Người mua hàng", "Tên đơn vị", "Khách hàng", "Bill To", "THE BUYER", "Applicant", "Ship To"
+   - For sellerName/buyerName: Extract ONLY the company name. Remove label prefixes like "Đơn vị bán hàng:", "Đơn vị mua hàng:", "Ký bởi:", etc.
+   - Example: "Đơn vị mua hàng: CÔNG TY TNHH FPT IS" → buyerName = "CÔNG TY TNHH FPT IS"
 7. For item table: Each row MUST have productName. quantity, unitPrice, amount are numeric or null.
    - IMPORTANT: For items, use "Thành tiền" (pre-tax amount) column, NOT "Thành tiền sau thuế" (after-tax amount).
+   - MULTI-PAGE OCR: The OCR text may contain MULTIPLE pages separated by "--- PAGE N ---" markers.
+     CRITICAL: Different pages may be DIFFERENT invoices scanned together in one file.
+     Always extract from PAGE 1 (the first page). Ignore items, totals, and "Số tiền viết bằng chữ" from later pages.
+     If PAGE 1 has its own "Tổng cộng" and "Số tiền viết bằng chữ", use THOSE values only.
+   - For UTILITY BILLS (tiền điện): The item table may have tiered pricing rows without standard STT/product name.
+     Group all consumption tiers into ONE item with productName="Điện tiêu thụ", quantity=total kWh, amount=total pre-tax amount.
 8. For totalAmount: Look for "Tổng cộng tiền thanh toán", "Total payment", "Total Amount", "Grand Total", "Tổng cộng", "TOTAL VALUE", "Amount Due"
    - For Vietnamese GTGT invoices: use "Tổng cộng tiền thanh toán" or the "Cộng tiền thanh toán" row in the tax summary table.
 9. For preTaxPrice (IMPORTANT - do NOT skip this field):
@@ -52,9 +60,27 @@ CRITICAL RULES:
 14. Remove currency symbols and thousand separators from numeric values. "3,240.00" → 3240.00, "$25,475.00" → 25475.00
 15. For Vietnamese number format: dot (.) is thousand separator, comma (,) is decimal separator.
     - "4.463.014" → 4463014, "10.185,19" → 10185.19, "62.103.270" → 62103270
-    - For European format: "3.050,00" → 3050.00
-    - CRITICAL for GTGT invoices: In the tax summary table, amounts like "3.848,00" in the "Thành tiền trước thuế" column mean 3,848,000 (3 triệu 848 nghìn), NOT 3848.00.
-      The comma and digits after it are decimal places of the THOUSANDS value. Cross-check with "Số tiền viết bằng chữ" to verify.
+    - CRITICAL for Vietnamese GTGT invoices — numbers can be VERY AMBIGUOUS:
+      a) "3.848,00" in tax summary = 3,848,000 VND (NOT 3848.00). The ",00" means zero hundreds.
+      b) "30.555,000" = 30,555,000 VND (NOT 30555.0). The ",000" means zero units.
+      c) "8.888,000" = 8,888,000 VND. The ",000" after comma is thousands continuation.
+      d) "20.655,00" = 20,655,000 VND (NOT 20655.00).
+     - VALIDATION RULE: Always verify amounts by computing quantity × unitPrice.
+      Example: qty=2500, unitPrice=12222 → amount MUST be 30,555,000 (not 30555).
+      Example: qty=1000, unitPrice=3848 → amount MUST be 3,848,000 (not 3848).
+      Example: qty=2000, unitPrice=4444 → amount MUST be 8,888,000 (not 8888).
+      Example: qty=5000, unitPrice=26000 → amount MUST be 130,000,000. taxAmount at 8% = 10,400,000.
+    - QUANTITY vs AMOUNT distinction:
+      * For QUANTITY column: "30,00" = 30 (comma is decimal separator, ,00 = .00). Quantities are typically small numbers (kg, cây, cái).
+      * For AMOUNT/PRICE columns: "30.555,000" = 30,555,000 VND. The VN thousands convention applies.
+      * For UNIT PRICE column: "67,90" can mean 67,900 VND. Verify: qty × unitPrice should ≈ amount.
+        Example: qty=30, unitPrice=67900 → amount=2,037,000. If unitPrice were 67.9, amount would be 2,037 which is too small for VND.
+    - STANDALONE DOT-NUMBERS (no comma): CRITICAL — In VND invoices, a number like "399.585" or "369.986"
+      is ALWAYS a thousands-separated integer: 399,585 VND and 369,986 VND respectively.
+      Similarly "511.730" = 511,730 VND, "29.599" = 29,599 VND.
+      NEVER interpret dots in VND amounts as decimal points. VND has NO decimal places.
+      If the result would be a non-integer (e.g., 399.585), you are wrong — it should be 399585.
+    - If "Số tiền viết bằng chữ" says "ba mươi triệu..." then total is 30,000,000+ range.
     - VND amounts are ALWAYS whole numbers (integers). If your calculation gives decimals for VND, you likely misread the number format.
 16. For invoiceTotalInWord: Look for "Số tiền viết bằng chữ", "Total amount in words", "In words", "SAY..."
     - Extract the FULL text as-is.
