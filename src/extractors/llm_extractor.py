@@ -28,12 +28,17 @@ Your task is to extract structured data from OCR text of invoices and commercial
 
 CRITICAL RULES:
 1. Extract EXACT numbers, names, and text as they appear in the source. Do NOT calculate, estimate, or modify values.
+   - CRITICAL: For totalAmount, preTaxPrice, taxAmount — ALWAYS use the values printed on the invoice (e.g., "Subtotal: $4,700", "TOTAL: 247,830,000").
+     NEVER recalculate these by summing items yourself. The printed totals on the invoice are authoritative.
+   - If the invoice shows "TOTAL: VND 678,503,000", return totalAmount=678503000, even if your item sum differs.
 2. For invoice ID: Look for patterns like "No.", "No:", "Số:", "Invoice No", "Invoice Number", "Number:", "#", "INV.", "Invoice #"
    - Clean the ID value: remove trailing punctuation marks like "!", ".", "," that may be OCR artifacts. E.g., "047!" → "047"
 3. For invoice name/title: Look for document title like "COMMERCIAL INVOICE", "INVOICE", "Proforma Invoice", "HÓA ĐƠN GIÁ TRỊ GIA TĂNG"
 4. For dates: Convert to YYYY-MM-DD format (ISO 8601). 
-   - IMPORTANT: For numeric-only dates like "09/05/2025", assume DD/MM/YYYY format (international standard, NOT US MM/DD/YYYY) unless context clearly indicates otherwise.
-   - Examples: "Feb 14, 2019" → "2019-02-14", "28-Oct-25" → "2025-10-28", "09/05/2025" → "2025-05-09", "20-Nov-2017" → "2017-11-20"
+   - Date format depends on document type:
+     a) Vietnamese invoices (GTGT, "Hóa đơn"): DD/MM/YYYY. "09/05/2025" → "2025-05-09" (May 9th)
+     b) English/Commercial invoices ("COMMERCIAL INVOICE", "INVOICE", "Proforma"): MM/DD/YYYY. "09/05/2025" → "2025-09-05" (Sep 5th)
+   - Named months are unambiguous: "Feb 14, 2019" → "2019-02-14", "28-Oct-25" → "2025-10-28", "20-Nov-2017" → "2017-11-20"
 5. For seller/exporter: Look for "Shipper", "Exporter", "Seller", "FROM", "Đơn vị bán hàng", "Người bán hàng", "Ship From", "THE SELLER", "Beneficiary"
 6. For buyer/importer: Look for "Consignee", "Importer", "Buyer", "TO", "Người mua hàng", "Tên đơn vị", "Khách hàng", "Bill To", "THE BUYER", "Applicant", "Ship To"
    - For sellerName/buyerName: Extract ONLY the company name. Remove label prefixes like "Đơn vị bán hàng:", "Đơn vị mua hàng:", "Ký bởi:", etc.
@@ -55,7 +60,14 @@ CRITICAL RULES:
 10. For currency: Look for "$", "USD", "EUR", "GBP", "VND", "₫", "£", "€", "Đồng tiền thanh toán" or explicit "Currency:" labels
 11. For tax: Look for "VAT", "Tax", "GST", "CGST", "SGST", "Thuế GTGT", "Thuế suất GTGT"
     - For Vietnamese GTGT: "KCT" or "Không chịu thuế" means tax-exempt → taxPercent = "KCT", taxAmount = 0
+     - CRITICAL: Do NOT confuse payment terms with tax percentage!
+       "T/T 30%" means 30% deposit payment, NOT 30% tax. "L/C", "30% advance", "30% deposit" are payment terms.
+       taxPercent must come from explicit tax/VAT lines like "VAT 10%", "Tax Rate: 5%", "Thuế suất GTGT: 8%".
+       If no explicit tax/VAT rate is found, return taxPercent as null or "0%".
 12. If a field is genuinely not found in the text, return null — NEVER guess or hallucinate.
+     - CRITICAL: Template placeholders are NOT real values. If a field contains patterns like:
+       [Invoice.No], [Sender.Company], [Client.Name], {field_name}, {{placeholder}}, [Your Company], etc.
+       These are unfilled template variables — return null for that field.
 13. For amount fields (preTaxPrice, taxAmount, totalAmount, unitPrice, amount, quantity): return as numbers, NOT strings.
 14. Remove currency symbols and thousand separators from numeric values. "3,240.00" → 3240.00, "$25,475.00" → 25475.00
 15. For Vietnamese number format: dot (.) is thousand separator, comma (,) is decimal separator.
@@ -219,6 +231,24 @@ def _parse_llm_json(raw_response: str) -> Optional[dict]:
         return None
 
 
+# Regex to detect template placeholder values
+_PLACEHOLDER_RE = re.compile(r'^\[.*\]$|^\{.*\}$|^\{\{.*\}\}$')
+
+
+def _clean_placeholder_values(result: dict) -> dict:
+    """Remove template placeholder values like [Invoice.No], {field_name}."""
+    if not result:
+        return result
+    
+    for key, val in list(result.items()):
+        if key == 'itemList':
+            continue
+        if isinstance(val, str) and _PLACEHOLDER_RE.match(val.strip()):
+            result[key] = None
+    
+    return result
+
+
 def extract_invoice_llm(
     raw_text: str,
     zoom_text: str = "",
@@ -270,6 +300,9 @@ def extract_invoice_llm(
         if result is None:
             logger.error("Failed to parse LLM response as JSON")
             return None
+        
+        # Post-processing: clean template placeholders
+        result = _clean_placeholder_values(result)
         
         logger.info(
             f"LLM extraction successful: "
