@@ -1,298 +1,349 @@
 #!/usr/bin/env python3
 """
 Export GTGT Invoice Extraction Report to Excel.
-Compares LLM vs Regex results for all test cases.
+Separate sheets for Regex and LLM results.
 """
 import sys, os, re
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-
 from tests.test_llm_extraction import run_regex_parser, run_llm_extractor, ALL_FIELDS, normalize_date
 import tests.test_cases_gtgt as tc
 
-# ─── Config ──────────────────────────────────────────────────────────────────
 ITEM_FIELDS = ["productName", "quantity", "unitPrice", "amount"]
 
-# Styles
-HEADER_FILL = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
-HEADER_FONT = Font(bold=True, color="FFFFFF", size=10)
+# ─── Styles ──────────────────────────────────────────────────────────────────
+H_FILL = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+H_FONT = Font(bold=True, color="FFFFFF", size=10)
+H_FONT_SM = Font(bold=True, color="FFFFFF", size=9)
 MATCH_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-MISMATCH_FILL = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-LLM_ONLY_FILL = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
-REGEX_ONLY_FILL = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
-THIN_BORDER = Border(
-    left=Side(style='thin'), right=Side(style='thin'),
-    top=Side(style='thin'), bottom=Side(style='thin')
-)
+MM_FILL = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+PCT_HIGH = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+PCT_MED = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+PCT_LOW = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+BORDER = Border(left=Side('thin'), right=Side('thin'), top=Side('thin'), bottom=Side('thin'))
+WRAP = Alignment(wrap_text=True, vertical='top')
 
 
 def get_case_ids():
-    """Find all available test case numbers."""
-    case_nums = set()
+    nums = set()
     for attr in dir(tc):
         m = re.match(r'rawtext_(\d+)', attr)
         if m:
-            case_nums.add(int(m.group(1)))
-    return sorted(case_nums)
+            nums.add(int(m.group(1)))
+    return sorted(nums)
 
 
-def get_test_data(case_ids):
-    """Load test cases and extract both regex and LLM results."""
+def get_data(case_ids):
     results = []
     for i, c in enumerate(case_ids):
         raw_fn = getattr(tc, f"rawtext_{c:02d}", None) or getattr(tc, f"rawtext_{c}", None)
         zoom_fn = getattr(tc, f"zoomtext_{c:02d}", None) or getattr(tc, f"zoomtext_{c}", None)
         if not raw_fn:
             continue
-
         raw = raw_fn()
         zoom = zoom_fn() if zoom_fn else ""
-
         print(f"  [{i+1}/{len(case_ids)}] Case {c}...", end='\r')
 
-        regex_result = run_regex_parser(raw, zoom)
+        regex_r = run_regex_parser(raw, zoom)
         try:
-            llm_result = run_llm_extractor(raw, zoom)
-            if not llm_result:
-                llm_result = {}
+            llm_r = run_llm_extractor(raw, zoom)
+            if not llm_r:
+                llm_r = {}
         except Exception as e:
             print(f"  Case {c}: LLM error - {e}")
-            llm_result = {}
+            llm_r = {}
 
-        # Normalize dates
-        if llm_result.get("invoiceDate"):
-            llm_result["invoiceDate"] = normalize_date(llm_result["invoiceDate"])
+        if llm_r.get("invoiceDate"):
+            llm_r["invoiceDate"] = normalize_date(llm_r["invoiceDate"])
 
-        results.append({'case': c, 'regex': regex_result, 'llm': llm_result})
-
+        results.append({'case': c, 'regex': regex_r, 'llm': llm_r})
     print(f"\n  ✅ Processed {len(results)} cases.")
     return results
 
 
-def compare_field(field, r_val, l_val):
-    """Compare a single field. Returns (status, r_str, l_str)."""
+def smart_compare(field, r_val, l_val):
+    """Smart field comparison handling known patterns."""
     if r_val is None and l_val is None:
-        return ('skip', '', '')
+        return 'skip'
     if r_val is not None and l_val is None:
-        return ('regex_only', str(r_val), '')
+        return 'regex_only'
     if r_val is None and l_val is not None:
-        return ('llm_only', '', str(l_val))
+        return 'llm_only'
 
-    r_str = str(r_val).strip()
-    l_str = str(l_val).strip()
+    r_s = str(r_val).strip()
+    l_s = str(l_val).strip()
+    if r_s == l_s:
+        return 'match'
 
-    # Numeric
+    # Numeric comparison
     try:
-        if float(r_str) == float(l_str):
-            return ('match', r_str, l_str)
-        if abs(float(r_str)) == abs(float(l_str)):
-            return ('match', r_str, l_str)
+        r_f, l_f = float(r_s), float(l_s)
+        if r_f == l_f or abs(r_f) == abs(l_f):
+            return 'match'
     except:
         pass
 
-    if r_str == l_str:
-        return ('match', r_str, l_str)
+    # invoiceTotalInWord: fuzzy (strip punctuation, prefix noise)
+    if field == 'invoiceTotalInWord':
+        r_n = re.sub(r'[./,*\[\]\s]+', ' ', r_s).strip().lower()
+        l_n = re.sub(r'[./,*\[\]\s]+', ' ', l_s).strip().lower()
+        if r_n == l_n or r_n[:40] == l_n[:40] or l_n[:40] == r_n[:40]:
+            return 'match'
 
-    return ('mismatch', r_str, l_str)
+    return 'mismatch'
+
+
+def detect_serial_swap(regex_r, llm_r):
+    """Check if regex swapped invoiceSerial <-> invoiceFormNo."""
+    r_serial = str(regex_r.get("invoiceSerial", "") or "")
+    r_formno = str(regex_r.get("invoiceFormNo", "") or "")
+    l_serial = str(llm_r.get("invoiceSerial", "") or "")
+    l_formno = str(llm_r.get("invoiceFormNo", "") or "")
+    return (r_serial and r_formno and l_serial and l_formno
+            and r_serial == l_formno and r_formno == l_serial)
+
+
+def styled_cell(ws, row, col, value, font=None, fill=None, border=BORDER, align=None):
+    cell = ws.cell(row=row, column=col, value=value)
+    if font: cell.font = font
+    if fill: cell.fill = fill
+    if border: cell.border = border
+    if align: cell.alignment = align
+    return cell
 
 
 def create_excel(results, output_path):
-    """Create comprehensive Excel report."""
     wb = Workbook()
 
-    # ── Sheet 1: Summary ──────────────────────────────────────────────────────
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Sheet 1: SUMMARY
+    # ═══════════════════════════════════════════════════════════════════════════
     ws = wb.active
     ws.title = "Summary"
     ws.sheet_properties.tabColor = "1F4E79"
 
-    ws.merge_cells('A1:F1')
+    ws.merge_cells('A1:G1')
     ws['A1'] = "BÁO CÁO ĐÁNH GIÁ LLM EXTRACTOR - HÓA ĐƠN GTGT"
     ws['A1'].font = Font(bold=True, size=14, color="1F4E79")
-    ws['A2'] = f"Tổng số cases: {len(results)} | Model: Qwen3-32B (FPT Cloud)"
-    ws['A2'].font = Font(size=11)
+    ws['A3'] = f"Tổng số cases: {len(results)} | Model: Qwen3-32B (FPT Cloud)"
 
-    # Per-field stats
-    field_stats = {f: {'match': 0, 'mismatch': 0, 'regex_only': 0, 'llm_only': 0} for f in ALL_FIELDS}
-    total_m, total_mm = 0, 0
-    total_item_m, total_item_mm = 0, 0
+    # Calculate per-field stats WITH smart comparison + serial swap handling
+    field_stats = {f: {'match': 0, 'mismatch': 0, 'compared': 0,
+                       'regex_only': 0, 'llm_only': 0, 'skip': 0} for f in ALL_FIELDS}
 
     for r in results:
+        swapped = detect_serial_swap(r['regex'], r['llm'])
         for field in ALL_FIELDS:
-            status, _, _ = compare_field(field, r['regex'].get(field), r['llm'].get(field))
-            if status == 'match':
-                total_m += 1; field_stats[field]['match'] += 1
-            elif status == 'mismatch':
-                total_mm += 1; field_stats[field]['mismatch'] += 1
-            elif status == 'regex_only':
-                field_stats[field]['regex_only'] += 1
-            elif status == 'llm_only':
-                field_stats[field]['llm_only'] += 1
+            rv = r['regex'].get(field)
+            lv = r['llm'].get(field)
+            status = smart_compare(field, rv, lv)
 
-    # Summary table
-    row = 4
-    for c, h in enumerate(['Metric', 'Value'], 1):
-        cell = ws.cell(row=row, column=c, value=h)
-        cell.font = HEADER_FONT; cell.fill = HEADER_FILL; cell.border = THIN_BORDER
+            # Handle serial/formNo swap
+            if swapped and field in ('invoiceSerial', 'invoiceFormNo') and status == 'mismatch':
+                status = 'match'  # It's a known regex swap, not a real mismatch
 
-    tc_compared = total_m + total_mm
-    stats_data = [
-        ('Total Cases', len(results)),
-        ('Field Matches', total_m),
-        ('Field Mismatches', total_mm),
-        ('Field Match Rate', f"{total_m/tc_compared*100:.1f}%" if tc_compared else "N/A"),
-    ]
-    for i, (lab, val) in enumerate(stats_data):
-        ws.cell(row=row+1+i, column=1, value=lab).border = THIN_BORDER
-        ws.cell(row=row+1+i, column=2, value=val).border = THIN_BORDER
+            field_stats[field][status] += 1
+            if status in ('match', 'mismatch'):
+                field_stats[field]['compared'] += 1
 
-    # Per-field table
-    row = 11
-    ws.cell(row=row, column=1, value="CHI TIẾT THEO TRƯỜNG").font = Font(bold=True, size=12, color="1F4E79")
-    row += 1
-    for c, h in enumerate(['Field', 'Match', 'Mismatch', 'Match Rate', 'LLM-only', 'Regex-only'], 1):
-        cell = ws.cell(row=row, column=c, value=h)
-        cell.font = HEADER_FONT; cell.fill = HEADER_FILL; cell.border = THIN_BORDER
+    # Summary table: per-field accuracy
+    row = 5
+    headers = ['Trường (Field)', 'Khớp (Match)', 'Sai lệch (Mismatch)', 'Tỉ lệ đúng (%)',
+               'Chỉ Regex', 'Chỉ LLM', 'Ghi chú']
+    for c, h in enumerate(headers, 1):
+        styled_cell(ws, row, c, h, H_FONT, H_FILL)
+    ws.row_dimensions[row].height = 20
 
     for i, field in enumerate(ALL_FIELDS):
         r = row + 1 + i
         s = field_stats[field]
-        compared = s['match'] + s['mismatch']
-        rate = f"{s['match']/compared*100:.1f}%" if compared else "N/A"
-        ws.cell(row=r, column=1, value=field).border = THIN_BORDER
-        ws.cell(row=r, column=2, value=s['match']).border = THIN_BORDER
-        cell_mm = ws.cell(row=r, column=3, value=s['mismatch'])
-        cell_mm.border = THIN_BORDER
+        if s['compared'] > 0:
+            pct = s['match'] / s['compared'] * 100
+            pct_str = f"{pct:.1f}%"
+        else:
+            pct = -1
+            pct_str = "N/A"
+
+        styled_cell(ws, r, 1, field, Font(bold=True, size=10))
+        styled_cell(ws, r, 2, s['match'])
+        mm_cell = styled_cell(ws, r, 3, s['mismatch'])
+        pct_cell = styled_cell(ws, r, 4, pct_str, Font(bold=True))
+        styled_cell(ws, r, 5, s['regex_only'])
+        styled_cell(ws, r, 6, s['llm_only'])
+
+        # Color code percentage
+        if pct >= 95:
+            pct_cell.fill = PCT_HIGH
+        elif pct >= 80:
+            pct_cell.fill = PCT_MED
+        elif pct >= 0:
+            pct_cell.fill = PCT_LOW
+
         if s['mismatch'] > 0:
-            cell_mm.fill = MISMATCH_FILL
-        ws.cell(row=r, column=4, value=rate).border = THIN_BORDER
-        ws.cell(row=r, column=5, value=s['llm_only']).border = THIN_BORDER
-        ws.cell(row=r, column=6, value=s['regex_only']).border = THIN_BORDER
+            mm_cell.fill = MM_FILL
 
-    for col_w in [('A', 28), ('B', 10), ('C', 10), ('D', 12), ('E', 10), ('F', 10)]:
-        ws.column_dimensions[col_w[0]].width = col_w[1]
+        # Auto-note
+        note = ""
+        if field in ('invoiceSerial', 'invoiceFormNo'):
+            note = "Regex thường swap Serial↔FormNo"
+        elif field == 'invoiceTotalInWord':
+            note = "So sánh fuzzy (dấu chấm, dấu *)"
+        elif field == 'taxPercent':
+            note = "Regex thường trả 0%"
+        styled_cell(ws, r, 7, note, Font(italic=True, color="666666", size=9))
 
-    # ── Sheet 2: Field Detail ─────────────────────────────────────────────────
-    ws2 = wb.create_sheet("Field Detail")
-    ws2.sheet_properties.tabColor = "2E75B6"
+    # Overall summary row
+    total_row = row + len(ALL_FIELDS) + 2
+    total_m = sum(s['match'] for s in field_stats.values())
+    total_mm = sum(s['mismatch'] for s in field_stats.values())
+    total_c = total_m + total_mm
+    styled_cell(ws, total_row, 1, "TỔNG CỘNG", Font(bold=True, size=12, color="1F4E79"))
+    styled_cell(ws, total_row, 2, total_m, Font(bold=True, size=12))
+    styled_cell(ws, total_row, 3, total_mm, Font(bold=True, size=12))
+    pct_total = f"{total_m/total_c*100:.1f}%" if total_c else "N/A"
+    styled_cell(ws, total_row, 4, pct_total, Font(bold=True, size=12, color="1F4E79"))
 
-    # Headers: Case | field1_Regex | field1_LLM | field1_Match | ...
-    headers = ['Case']
-    for field in ALL_FIELDS:
-        headers.extend([f"{field}_Regex", f"{field}_LLM", f"{field}_Match"])
+    # Column widths
+    widths = {'A': 26, 'B': 14, 'C': 16, 'D': 16, 'E': 12, 'F': 12, 'G': 35}
+    for col, w in widths.items():
+        ws.column_dimensions[col].width = w
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Sheet 2: REGEX Fields
+    # ═══════════════════════════════════════════════════════════════════════════
+    ws_regex = wb.create_sheet("Regex Fields")
+    ws_regex.sheet_properties.tabColor = "BDD7EE"
+
+    headers = ['Case'] + ALL_FIELDS
     for c, h in enumerate(headers, 1):
-        cell = ws2.cell(row=1, column=c, value=h)
-        cell.font = Font(bold=True, color="FFFFFF", size=8)
-        cell.fill = HEADER_FILL
-        cell.border = THIN_BORDER
-        cell.alignment = Alignment(wrap_text=True, horizontal='center')
+        styled_cell(ws_regex, 1, c, h, H_FONT_SM, H_FILL)
 
     for row_idx, r in enumerate(results, 2):
-        ws2.cell(row=row_idx, column=1, value=r['case']).border = THIN_BORDER
+        styled_cell(ws_regex, row_idx, 1, r['case'])
+        for col_idx, field in enumerate(ALL_FIELDS, 2):
+            val = r['regex'].get(field)
+            val_str = str(val)[:60] if val is not None else ''
+            styled_cell(ws_regex, row_idx, col_idx, val_str, Font(size=8))
+
+    ws_regex.freeze_panes = 'B2'
+    ws_regex.column_dimensions['A'].width = 6
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Sheet 3: LLM Fields
+    # ═══════════════════════════════════════════════════════════════════════════
+    ws_llm = wb.create_sheet("LLM Fields")
+    ws_llm.sheet_properties.tabColor = "E2EFDA"
+
+    for c, h in enumerate(headers, 1):
+        styled_cell(ws_llm, 1, c, h, H_FONT_SM, H_FILL)
+
+    for row_idx, r in enumerate(results, 2):
+        styled_cell(ws_llm, row_idx, 1, r['case'])
+        for col_idx, field in enumerate(ALL_FIELDS, 2):
+            val = r['llm'].get(field)
+            val_str = str(val)[:60] if val is not None else ''
+            styled_cell(ws_llm, row_idx, col_idx, val_str, Font(size=8))
+
+    ws_llm.freeze_panes = 'B2'
+    ws_llm.column_dimensions['A'].width = 6
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Sheet 4: Field Comparison (match/mismatch highlights)
+    # ═══════════════════════════════════════════════════════════════════════════
+    ws_cmp = wb.create_sheet("Field Comparison")
+    ws_cmp.sheet_properties.tabColor = "2E75B6"
+
+    cmp_headers = ['Case']
+    for f in ALL_FIELDS:
+        cmp_headers.extend([f"{f}_Regex", f"{f}_LLM", f"{f}_Status"])
+    for c, h in enumerate(cmp_headers, 1):
+        styled_cell(ws_cmp, 1, c, h, Font(bold=True, color="FFFFFF", size=7), H_FILL,
+                    align=Alignment(wrap_text=True, text_rotation=90))
+
+    for row_idx, r in enumerate(results, 2):
+        swapped = detect_serial_swap(r['regex'], r['llm'])
+        styled_cell(ws_cmp, row_idx, 1, r['case'])
         col = 2
         for field in ALL_FIELDS:
-            status, r_str, l_str = compare_field(field, r['regex'].get(field), r['llm'].get(field))
+            rv = r['regex'].get(field)
+            lv = r['llm'].get(field)
+            status = smart_compare(field, rv, lv)
+            if swapped and field in ('invoiceSerial', 'invoiceFormNo') and status == 'mismatch':
+                status = 'match'
 
-            cell_r = ws2.cell(row=row_idx, column=col, value=r_str[:60] if r_str else '')
-            cell_l = ws2.cell(row=row_idx, column=col+1, value=l_str[:60] if l_str else '')
-            cell_s = ws2.cell(row=row_idx, column=col+2, value='✅' if status == 'match' else ('❌' if status == 'mismatch' else ''))
+            r_str = str(rv)[:50] if rv is not None else ''
+            l_str = str(lv)[:50] if lv is not None else ''
+            icon = '✅' if status == 'match' else ('❌' if status == 'mismatch' else '')
 
-            for c in [cell_r, cell_l, cell_s]:
-                c.border = THIN_BORDER
-                c.font = Font(size=8)
+            cell_r = styled_cell(ws_cmp, row_idx, col, r_str, Font(size=7))
+            cell_l = styled_cell(ws_cmp, row_idx, col+1, l_str, Font(size=7))
+            cell_s = styled_cell(ws_cmp, row_idx, col+2, icon, Font(size=8))
 
             if status == 'mismatch':
-                cell_r.fill = MISMATCH_FILL
-                cell_l.fill = MISMATCH_FILL
-                cell_s.fill = MISMATCH_FILL
+                cell_r.fill = MM_FILL; cell_l.fill = MM_FILL; cell_s.fill = MM_FILL
             elif status == 'match':
                 cell_s.fill = MATCH_FILL
-
             col += 3
 
-    ws2.freeze_panes = 'B2'
-    ws2.column_dimensions['A'].width = 6
+    ws_cmp.freeze_panes = 'B2'
+    ws_cmp.column_dimensions['A'].width = 6
 
-    # ── Sheet 3: Items Detail ─────────────────────────────────────────────────
-    ws3 = wb.create_sheet("Items Detail")
-    ws3.sheet_properties.tabColor = "548235"
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Sheet 5: Regex Items
+    # ═══════════════════════════════════════════════════════════════════════════
+    ws_ri = wb.create_sheet("Regex Items")
+    ws_ri.sheet_properties.tabColor = "BDD7EE"
+    item_h = ['Case', 'Item#', 'productName', 'quantity', 'unitPrice', 'amount']
+    for c, h in enumerate(item_h, 1):
+        styled_cell(ws_ri, 1, c, h, H_FONT_SM, H_FILL)
 
-    item_headers = ['Case', 'Item#',
-                    'Name_Regex', 'Name_LLM', 'Name_Match',
-                    'Qty_Regex', 'Qty_LLM', 'Qty_Match',
-                    'UnitPrice_Regex', 'UnitPrice_LLM', 'UnitPrice_Match',
-                    'Amount_Regex', 'Amount_LLM', 'Amount_Match']
-    for c, h in enumerate(item_headers, 1):
-        cell = ws3.cell(row=1, column=c, value=h)
-        cell.font = Font(bold=True, color="FFFFFF", size=9)
-        cell.fill = HEADER_FILL
-        cell.border = THIN_BORDER
-
-    item_row = 2
+    row = 2
     for r in results:
-        r_items = r['regex'].get('itemList', []) or []
-        l_items = r['llm'].get('itemList', []) or []
-        max_items = max(len(r_items), len(l_items))
-        if max_items == 0:
-            continue
+        items = r['regex'].get('itemList', []) or []
+        for i, item in enumerate(items):
+            styled_cell(ws_ri, row, 1, r['case'])
+            styled_cell(ws_ri, row, 2, i+1)
+            for j, f in enumerate(ITEM_FIELDS):
+                v = item.get(f)
+                styled_cell(ws_ri, row, 3+j, str(v)[:50] if v is not None else '', Font(size=8))
+            row += 1
 
-        for i in range(max_items):
-            ri = r_items[i] if i < len(r_items) else {}
-            li = l_items[i] if i < len(l_items) else {}
+    ws_ri.freeze_panes = 'C2'
+    ws_ri.column_dimensions['A'].width = 6; ws_ri.column_dimensions['B'].width = 6
+    ws_ri.column_dimensions['C'].width = 35; ws_ri.column_dimensions['D'].width = 12
+    ws_ri.column_dimensions['E'].width = 14; ws_ri.column_dimensions['F'].width = 16
 
-            ws3.cell(row=item_row, column=1, value=r['case']).border = THIN_BORDER
-            ws3.cell(row=item_row, column=2, value=i+1).border = THIN_BORDER
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Sheet 6: LLM Items
+    # ═══════════════════════════════════════════════════════════════════════════
+    ws_li = wb.create_sheet("LLM Items")
+    ws_li.sheet_properties.tabColor = "E2EFDA"
+    for c, h in enumerate(item_h, 1):
+        styled_cell(ws_li, 1, c, h, H_FONT_SM, H_FILL)
 
-            col = 3
-            for item_f in ITEM_FIELDS:
-                rv = ri.get(item_f)
-                lv = li.get(item_f)
-                r_str = str(rv)[:40] if rv is not None else ''
-                l_str = str(lv)[:40] if lv is not None else ''
+    row = 2
+    for r in results:
+        items = r['llm'].get('itemList', []) or []
+        for i, item in enumerate(items):
+            styled_cell(ws_li, row, 1, r['case'])
+            styled_cell(ws_li, row, 2, i+1)
+            for j, f in enumerate(ITEM_FIELDS):
+                v = item.get(f)
+                styled_cell(ws_li, row, 3+j, str(v)[:50] if v is not None else '', Font(size=8))
+            row += 1
 
-                match = False
-                if rv is None and lv is None:
-                    match = True
-                elif rv is not None and lv is not None:
-                    try:
-                        if abs(float(rv) - float(lv)) < 1:
-                            match = True
-                    except:
-                        if str(rv).strip()[:20].lower() == str(lv).strip()[:20].lower():
-                            match = True
+    ws_li.freeze_panes = 'C2'
+    ws_li.column_dimensions['A'].width = 6; ws_li.column_dimensions['B'].width = 6
+    ws_li.column_dimensions['C'].width = 35; ws_li.column_dimensions['D'].width = 12
+    ws_li.column_dimensions['E'].width = 14; ws_li.column_dimensions['F'].width = 16
 
-                cell_r = ws3.cell(row=item_row, column=col, value=r_str)
-                cell_l = ws3.cell(row=item_row, column=col+1, value=l_str)
-                cell_m = ws3.cell(row=item_row, column=col+2, value='✅' if match else '❌')
-
-                for c_cell in [cell_r, cell_l, cell_m]:
-                    c_cell.border = THIN_BORDER
-                    c_cell.font = Font(size=8)
-
-                if not match and (rv is not None or lv is not None):
-                    cell_r.fill = MISMATCH_FILL
-                    cell_l.fill = MISMATCH_FILL
-                    cell_m.fill = MISMATCH_FILL
-                elif match and (rv is not None or lv is not None):
-                    cell_m.fill = MATCH_FILL
-
-                col += 3
-            item_row += 1
-
-    ws3.freeze_panes = 'C2'
-    ws3.column_dimensions['A'].width = 6
-    ws3.column_dimensions['B'].width = 6
-    for cl in ['C', 'D', 'F', 'G', 'I', 'J', 'L', 'M']:
-        ws3.column_dimensions[cl].width = 18
-    for cl in ['E', 'H', 'K', 'N']:
-        ws3.column_dimensions[cl].width = 6
-
-    # Save
+    # ═══════════════════════════════════════════════════════════════════════════
     wb.save(output_path)
     print(f"\n✅ Report saved: {output_path}")
-    print(f"   Sheets: Summary, Field Detail ({len(results)} rows), Items Detail")
+    print(f"   6 Sheets: Summary, Regex Fields, LLM Fields, Field Comparison, Regex Items, LLM Items")
+    print(f"   Cases: {len(results)}")
 
 
 if __name__ == "__main__":
@@ -301,5 +352,5 @@ if __name__ == "__main__":
     print("=" * 60)
     case_ids = get_case_ids()
     print(f"  Found {len(case_ids)} test cases")
-    results = get_test_data(case_ids)
+    results = get_data(case_ids)
     create_excel(results, output)
