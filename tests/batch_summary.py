@@ -84,9 +84,13 @@ def compare_items(r_items, l_items):
         except (ValueError, TypeError):
             qty_match = str(r_qty) == str(l_qty)
         
-        # Check name match (fuzzy - first 20 chars or substring)
-        r_n20 = r_name[:20].strip().lower()
-        l_n20 = l_name[:20].strip().lower()
+        # Check name match (fuzzy - strip STT prefix, first 20 chars or substring)
+        import re as _re_n
+        # Strip leading STT: "3. ", "10) ", "A. ", "1- " etc.
+        r_n_clean = _re_n.sub(r'^\d+[\.\)\-]\s*', '', r_name).strip()
+        l_n_clean = _re_n.sub(r'^\d+[\.\)\-]\s*', '', l_name).strip()
+        r_n20 = r_n_clean[:20].strip().lower()
+        l_n20 = l_n_clean[:20].strip().lower()
         name_match = (r_n20 == l_n20 or r_name == "-" or l_name == "-"
                       or r_n20 in l_n20 or l_n20 in r_n20)
         
