@@ -1,4 +1,4 @@
-# DeepSeek-OCR (vLLM + FastAPI + Docker)
+# OCR (vLLM + FastAPI + Docker)
 
 Local Vision OCR API sử dụng:
 
