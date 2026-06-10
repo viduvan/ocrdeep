@@ -511,7 +511,18 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
         # Note: Title may be split across lines like "# HÓA ĐƠN\nGIÁ TRỊ GIA TĂNG"
         # GUARD: Do NOT reclassify pipe-table rows as header when already in table mode
         # (e.g. product name "Kỳ hóa đơn" contains "hóa đơn" but is a data row)
-        if current != "table" and not (seen_table and l.startswith("|")) and (any(k in l for k in [
+        # GUARD: Do NOT reclassify buyer/seller label:value lines where "hóa đơn" appears
+        # in the VALUE part (e.g. "Tên đơn vị: Công ty TNHH Hóa Đơn Điện Tử")
+        _is_label_value_line = current in ("buyer", "seller") and ":" in l
+        _header_kw_in_value_only = False
+        if _is_label_value_line:
+            _label_part = l.split(":", 1)[0]
+            _header_kws_to_check = ["hóa đơn", "hòa đơn", "invoice"]
+            _kw_in_full = any(k in l for k in _header_kws_to_check)
+            _kw_in_label = any(k in _label_part for k in _header_kws_to_check)
+            if _kw_in_full and not _kw_in_label:
+                _header_kw_in_value_only = True
+        if current != "table" and not (seen_table and l.startswith("|")) and not _header_kw_in_value_only and (any(k in l for k in [
             "hóa đơn",                  # Added: partial match for multi-line titles
             "hòa đơn",                  # Case 171: OCR misspelling with grave accent
             "phiếu xuất kho",            # Added: Internal transfer slips
@@ -735,8 +746,24 @@ def parse_header(block: List[str], invoice: Invoice):
                        "cần kiểm tra", "giao nhận", "thay thế", "mã nhận",
                        "trang trả cứu", "bản thể hiện"]
         _is_footer = any(fk in low for fk in _footer_kws)
+        # Case 173: Reject ID-label lines that happen to contain invoice keywords
+        # e.g. "Số hóa đơn (Invoice No.): 0000001" — "hóa đơn" is in the label but it's an ID label
+        # e.g. "Đơn vị cung cấp dịch vụ Hóa đơn điện tử: ..." — company name context
+        _is_id_or_meta_label = False
+        if is_invoice_title and ":" in line:
+            _label_part = line.split(":", 1)[0].lower()
+            # ID labels: "Số hóa đơn", "Số phiếu", "Invoice No"
+            _id_label_kws = ["số hóa đơn", "số phiếu", "invoice no", "đơn vị cung cấp",
+                             "đơn vị phát hành"]
+            if any(ik in _label_part for ik in _id_label_kws):
+                _is_id_or_meta_label = True
+            # Also reject if the keyword is ONLY in value part (after colon), not label
+            _label_part_up = _label_part.upper()
+            _kw_in_label = any(kw in _label_part_up for kw in invoice_type_keywords)
+            if not _kw_in_label:
+                _is_id_or_meta_label = True
         
-        if (is_invoice_title or is_continuation) and "thay thế" not in low and not _is_footer:
+        if (is_invoice_title or is_continuation) and "thay thế" not in low and not _is_footer and not _is_id_or_meta_label:
             # Clean markdown header markers
             name = line.strip().lstrip("# ").strip()
             # For "COMMERCIAL INVOICE - No20250321003", strip the No... part for invoiceName
@@ -836,8 +863,10 @@ def parse_header(block: List[str], invoice: Invoice):
         # Form No (mẫu số) - ít dùng trong hóa đơn điện tử mới
         # Skip lines containing "hóa đơn bị hủy" - these reference cancelled invoices
         # Skip lines containing "điều chỉnh" - these reference the original invoice, not the current one
+        # Skip lines containing "thay thế" - Case 174: "Thay thế cho hóa đơn Mẫu số: 1, ..." is a replacement reference
         if ("mẫu số" in low and "hóa đơn bị hủy" not in low 
-                and "hoá đơn bị huỷ" not in low and "điều chỉnh" not in low):
+                and "hoá đơn bị huỷ" not in low and "điều chỉnh" not in low
+                and "thay thế" not in low):
             m = re.search(r":\s*(\S+)", line)
             if m:
                 invoice.invoiceFormNo = m.group(1)
@@ -2122,6 +2151,10 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
         if re.search(r'\bVN[DĐ]\b', text_upper): vnd_score += 3
         if re.search(r'đồng\b', raw_text, re.I): vnd_score += 2
         if re.search(r'nghìn|triệu|tỷ', raw_text, re.I): vnd_score += 1
+        # Case 174: Vietnamese GTGT invoice structure → strong VND indicator
+        if re.search(r'HÓA\s+ĐƠN\s+GIÁ\s+TRỊ\s+GIA\s+TĂNG', raw_text): vnd_score += 3
+        if re.search(r'thuế\s+(?:suất\s+)?GTGT|VAT\s+(?:rate|payable)', raw_text, re.I): vnd_score += 2
+        if re.search(r'Mã\s+số\s+thuế', raw_text): vnd_score += 1
         if vnd_score > 0:
             scores['VND'] = vnd_score
 
