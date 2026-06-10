@@ -1446,6 +1446,30 @@ def zoomtext_172():
     return ''
 
 
+# ── Case 173: VietnamInvoice11.pdf ──
+def rawtext_173():
+    return '# HÓA ĐƠN GIÁ TRỊ GIA TĂNG  \n**INVOICE (VAT)**  \n\n**Bản thể hiện của hóa đơn điện tử**  \n*(Electronic invoice display)*  \n\n**Mẫu số (Form):** 01GTKT01/14  \n**Ký hiệu (Serial):** AA/16E  \n**Số hóa đơn (Invoice No.):** 0000001  \n\n**Ngày (date):** 08 tháng (month) 06 năm (year) 2018  \n\n---\n\nHọ tên người mua hàng *(Buyer\'s name):* Nguyễn Văn A  \nTên đơn vị *(Company):* Công ty TNHH Hóa Đơn Điện Tử  \nMã số thuế *(Tax code):*  \nĐịa chỉ *(Address):* Số 01, đường B, quận C, Hà Nội  \nHình thức thanh toán *(Payment form):*  \n\n**Số tài khoản *(Account Number):*** 0123456789  \n\n| STT (No.) | Tên hàng hóa, dịch vụ (Description) | Đơn vị tính (Unit) | Số lượng (Quantity) | Đơn giá (Unit price) | Thành tiền (Amount) |\n|---|---|---|---|---|---|\n| 1    | 2    | 3    | 4    | 5    | 6 = 4 x 5    |\n| 1    | Máy tính Lenovo    | Chiếc    | 10    | 1.000.000    | 10.000.000    |\n| 2    | Máy tính Dell    | Chiếc    | 20    | 2.000.000    | 40.000.000    |\n\n**Chiết khấu *(Discount):*** 1.000.000  \n\n**Cộng tiền hàng *(Sub total):*** 50.000.000  \n\n**Thuế suất GTGT *(VAT rate):* 10 %**  \n**Tiền thuế GTGT *(VAT payable):*** 5.000.000  \n\n**Tổng cộng tiền thanh toán *(Grand total):*** 53.900.000  \n\n---\n\nSố tiền viết bằng chữ *(Amount in words):* Năm mươi ba triệu chín trăm nghìn đồng  \n\n**Người mua hàng *(Buyer\'s name):***  \n(Ký, ghi rõ họ, tên)  \n*Sign & full name*  \n\n**Người bán hàng *(Seller\'s name):***  \n(Ký, ghi rõ họ, tên)  \n*Sign & full name*  \n\n**Signature valid**  \n**Ký bởi TẬP ĐOÀN VIỄN THÔNG TƯỜNG ĐỘI**  \n**Ký ngày 08/06/2018**  \n\n---\n\n*(Cần kiểm tra, đối chiếu khi lắp, giao, nhận hóa đơn)*  \n*Đơn vị cung cấp dịch vụ Hóa đơn điện tử: Tập đoàn Công nghiệp – Viễn thông Quân đội (Viettel), MST: 0100109106*  \n*Tra cứu hóa đơn điện tử tại Website: https://trunvocs.vn/trunvocs/trunvocs.html*'
+
+def zoomtext_173():
+    return 'S  \nInvoice®  \nGIẢI PHÁP HÓA ĐƠN THÔNG MINH  \n\nHÓA ĐƠN GIÁ TRỊ GIA TĂNG  \nINVOICE (VAT)  \n\nBản thể hiện của hóa đơn điện tử  \n(Electronic invoice display)  \n\nNgày (date) 08 tháng (month) 06 năm (year) 2018  \n\nHọ tên người mua hàng (Buyer\'s name): Nguyễn Văn A  \nTên đơn vị (Company): Công ty TNHH Hóa Đơn Điện Tử  \nMã số thuế (Tax code):  \n\nMẫu số (Form): 01GTKT0/114  \nKý hiệu (Serial): AA/16E  \nSố hóa đơn (Invoice No.): 0000001'
+
+
+# ── Case 174: VietnamInvoice4.pdf (table loop/truncated) ──
+def rawtext_174():
+    return 'CÔNG TY TNHH MỘT THÀNH VIÊN HÙNG HÀO PHÁT\n\nMã số thuế (Tax code): 3701825484\nĐịa chỉ (Address): Thửa đất số 1091, Tờ bản đồ số E5.1, Khu phố Tân Thắng, Phường Tân Bình, Thành phố Dĩ An, Tỉnh Bình Dương, Việt Nam\nĐiện thoại (Tel): 0918 611 810\nSố tài khoản (AC No.): 65110001055415 Ngân hàng BIDV - CN Nam Bình Dương\n\nHÓA ĐƠN GIÁ TRỊ GIA TĂNG\n(Ký hiệu (Serial): 1C22THP\n(VAT INVOICE)\nSố (No.): 00008442\n(Hóa đơn thay thế)\nNgày (date) 16 tháng (month) 12 năm (year) 2022\nMCQT: 00D1F61A29E8A64DA89B184C849E45C16C\n\nHọ tên người mua hàng (Customer\'s name):\nTên đơn vị (Company\'s name): CÔNG TY TNHH EBADA VINA\nMã số thuế (Tax Code): 3702523302\nĐịa chỉ (Address): Lô số 10-2C đường số 3A, Khu công nghiệp Quốc tế Protrade, Xã An Tây, Thị xã Bến Cát, Tỉnh Bình Dương, Việt Nam\nHình thức thanh toán (Payment method): TM/CK\n\nThay thế cho hóa đơn Mẫu số: 1, ký hiệu C22THP, số 00008422, ngày 16 tháng 12 năm 2022\n\n| STT (No.) | Tên hàng hóa, dịch vụ (Descriptions) | Đơn vị tính (Unit) | Số lượng (Quantity) | Đơn giá (Unit Price) | Thành tiền (Amount) |\n|------------|----------------------------------------|-------------------|---------------------|---------------------|---------------------|\n| 1          | Gas Pacific (Bình 12kg)                | Kg                | 24                  | 33.333,33           | 800.000             |'
+
+def zoomtext_174():
+    return ''
+
+
+# ── Case 175: VietnamInvoice3.pdf (table loop/truncated) ──
+def rawtext_175():
+    return '# HÓA ĐƠN GIÁ TRỊ GIA TĂNG  \n(VAT INVOICE)  \n\nKý hiệu (Serial): 1C24TDP  \nSố (No.): 156  \n\nNgày (Date): 29 tháng (month) 06 năm (year) 2024  \n\n---\n\nĐơn vị bán hàng (Seller): DOANH NGHIỆP TƯ NHÂN ĐẠI PHÁT  \nMã số thuế (Tax code): 3600365128  \nĐịa chỉ (Address): Tổ 15, khu 13, Xã Long Đức, Huyện Long Thành, Tỉnh Đồng Nai, Việt Nam  \nĐiện thoại (Tel): 061.2647444  \n\n---\n\nHọ tên người mua hàng (Buyer):  \nTên đơn vị (Company name): CÔNG TY TNHH AGS VIETNAM  \nMã số thuế (Tax code): 0304246661  \nĐịa chỉ (Address): Số 2 Đường Lam Sơn, Phường 6, Quận Bình Thạnh, Thành phố Hồ Chí Minh, Việt Nam  \nHình thức thanh toán (Payment method): Tiền mặt/Chuyển khoản  \nSố tài khoản (AC No.):  \n\n---\n\n| STT (No.) | Tên hàng hóa, dịch vụ (Name of goods, services) | Đơn vị tính (Unit) | Số lượng (Quantity) | Đơn giá (Unit price) | Thành tiền (Amount) |\n|---|---|---|---|---|---|\n| (1)    | (2)    | (3)    | (4)    | (5)    | (6)=(4)x(5)    |\n| 1    | Keo bẫy chuột xanh    | miếng    | 1.500    | 4.800    | 7.200.000    |'
+
+def zoomtext_175():
+    return ''
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # REGISTRY
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1621,6 +1645,9 @@ CASES = [
     (170, 'hóa đơn1.png', rawtext_170, zoomtext_170),
     (171, '1.-BID_Non-duplicate_65571_Invoice_Domestic.pdf', rawtext_171, zoomtext_171),
     (172, '5551332.pdf', rawtext_172, zoomtext_172),
+    (173, 'VietnamInvoice11.pdf', rawtext_173, zoomtext_173),
+    (174, 'VietnamInvoice4.pdf', rawtext_174, zoomtext_174),
+    (175, 'VietnamInvoice3.pdf', rawtext_175, zoomtext_175),
 ]
 
 
