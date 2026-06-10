@@ -57,6 +57,7 @@ def _detect_zoom_blocks(lines: List[str]):
         "người mua",  # Case 171: "Người mua: Phoenix Spring Advisory"
         "tên người mua hàng", "họ tên người mua",
         "tên đơn vị mua", "người mua hàng:", "người mua",
+        "tên đơn vị",  # Case 173: "Tên đơn vị (Company):" in buyer section
         # EN Commercial Invoice
         "sold to", "ship to", "importer:", "importer details",
         "consigned to", "consignee name", "invoice to", "recipient", "receiver",
@@ -384,6 +385,15 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
                 # Skip generic VN commerce terms that aren't real company names
                 _generic_vn = {'xuất nhập khẩu', 'nhập khẩu', 'xuất khẩu', 
                               'thương mại', 'dịch vụ', 'sản xuất'}
+                # Case 173: Reject single-char values (e.g., "S" from OCR-split logo "S-Invoice")
+                if len(name_part_stripped) <= 2:
+                    continue  # Too short to be a company name
+                # Case 173: Reject document-type keywords as seller names (e.g., "Invoice®" from logo)
+                _name_low_stripped = re.sub(r'[®™©]', '', name_part_stripped).strip().lower()
+                _doc_type_kws = {'invoice', 'hóa đơn', 'hòa đơn', 'phiếu', 'receipt',
+                                 'packing list', 'bill of lading', 'quotation'}
+                if _name_low_stripped in _doc_type_kws:
+                    continue  # Document type keyword, not a company name
                 if name_part_stripped.lower() not in _generic_vn:
                     invoice.sellerName = name_part_stripped
                 else:
@@ -1009,7 +1019,22 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
             # Reject footer/disclaimer lines
             _footer_kws = ["kiểm tra", "đối chiếu", "tra cứu", "phát hành bởi", "cần kiểm tra",
                            "mã nhận", "trang trả cứu", "bản thể hiện"]
-            if not any(fk in clean.lower() for fk in _footer_kws):
+            # Case 173: Reject ID-label lines that contain invoice keywords but are not titles
+            # e.g. "Số hóa đơn (Invoice No.): 0000001" or "Tên đơn vị: Công ty TNHH Hóa Đơn Điện Tử"
+            _is_id_or_meta_label = False
+            if ":" in clean:
+                _label_part = clean.split(":", 1)[0].lower()
+                # ID labels: "Số hóa đơn", "Số phiếu", "Invoice No" — not invoice titles
+                _id_label_kws = ["số hóa đơn", "số phiếu", "invoice no", "đơn vị cung cấp",
+                                 "đơn vị phát hành"]
+                if any(ik in _label_part for ik in _id_label_kws):
+                    _is_id_or_meta_label = True
+                # Also reject if the keyword is ONLY in value part (after colon), not label
+                _label_part_up = _label_part.upper()
+                _kw_in_label = any(kw in _label_part_up for kw in invoice_type_keywords)
+                if not _kw_in_label:
+                    _is_id_or_meta_label = True  # keyword is only in value part → not a title
+            if not any(fk in clean.lower() for fk in _footer_kws) and not _is_id_or_meta_label:
                 name_clean = re.sub(r'\s*[-–—]\s*No\.?\s*[A-Z0-9]+$', '', clean, flags=re.I).strip()
                 name_clean = name_clean.lstrip('#').strip()  # strip markdown heading chars
                 # Skip markdown italic subtitles *(VAT INVOICE)*
@@ -1406,11 +1431,11 @@ def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
                         serial_parsed = True
 
         # --- Invoice Form No ---
-        if not invoice.invoiceFormNo:
-            if "mẫu số" in low or "form no" in low:
-                m = re.search(r"(?:Mẫu số|Form No).*?([0-9]+[A-Z0-9/]*)", line, re.I)
-                if m:
-                    invoice.invoiceFormNo = m.group(1)
+        # AUTHORITATIVE: Zoom text overrides raw text (Case 173: raw OCR error)
+        if "mẫu số" in low or "form no" in low:
+            m = re.search(r"(?:Mẫu số|Form No).*?([0-9]+[A-Z0-9/]*)", line, re.I)
+            if m:
+                invoice.invoiceFormNo = m.group(1)
 
         # --- Invoice ID (VN: Số ...: ####) ---
         # AUTHORITATIVE: Zoom text "Số:" with explicit label overrides block parser value
@@ -1420,7 +1445,8 @@ def parse_zoom_header(lines: List[str], invoice: Invoice) -> None:
             "tài khoản" not in low and "tiền" not in low and
             "thuế" not in low and "điện thoại" not in low and
             "địa chỉ" not in low and "address" not in low and
-            "đơn hàng" not in low and "cửa hàng" not in low
+            "đơn hàng" not in low and "cửa hàng" not in low and
+            "mẫu số" not in low and "form no" not in low  # Case 173: Mẫu số (Form): is FormNo not ID
         )
         if contains_keyword and is_clean:
             # Strip ALL asterisk markers for robust matching (handles nested bold like **Số *(Invoice No.)*: 00000438**)
