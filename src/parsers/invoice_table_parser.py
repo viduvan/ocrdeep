@@ -122,7 +122,6 @@ def parse_quantity(value: str) -> Optional[float]:
 
 # MAIN PARSER
 
-    return items
 
 
 def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
