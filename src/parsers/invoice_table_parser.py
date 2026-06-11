@@ -57,6 +57,9 @@ def safe_parse_float(value: str) -> Optional[float]:
         if len(parts) == 2 and len(parts[1]) <= 2:
             # Likely decimal: 1,50
             v = v.replace(',', '.')
+        elif len(parts) == 2 and parts[0].lstrip('-') == '0':
+            # Case 177: "0,588" — integer part is 0, comma MUST be decimal
+            v = v.replace(',', '.')
         else:
             # Likely thousand sep: 1,234,567
             v = v.replace(',', '')
@@ -212,7 +215,13 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
             # If not a ghost column, check keywords
             for field, kws in field_keywords.items():
                 if any(kw in low for kw in kws):
-                    detected_map[logical_idx] = field
+                    # Case 177: Guard against "thành tiền chưa có thuế GTGT" matching tax_amt
+                    # "chưa có thuế" = "before tax" → this is amount, not tax_amt
+                    if field == 'tax_amt' and ('chưa' in low or 'excluding' in low or 'trước thuế' in low):
+                        # Override: map as amount instead
+                        detected_map[logical_idx] = 'amount'
+                    else:
+                        detected_map[logical_idx] = field
                     matches += 1
                     break
             else:
