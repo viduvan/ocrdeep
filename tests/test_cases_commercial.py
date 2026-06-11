@@ -670,6 +670,24 @@ def zoomtext_73():
     return '# INVOICE\n\n## Beneficiary Name and Address\n**CÔNG TY TNHH GIẢI PHÁP PHẦN MỀM NAM VIỆT**\n\n123 Nguyen Hue Street,  \nWard 1, Cao Lanh City,  \nDong Thap Province,  \nVietnam  \n\n**BILL TO (Applicant Name & Address):**  \n**CÔNG TY CỔ PHẦN BÁN LẺ ĐIỆN MÁY SÀI GÒN**  \n45 Vo Van Kiet Boulevard,  \nNinh Kieu District, Can Tho City  \nVietnam  \n\n---\n\n## INVOICE NO.  \n**INVOICE NO.**  \n**DATE**  \nCTT-10052026-01  \n10/05/2026  \n\n---\n\n## CONTRACT NO.  \n**CONTRACT NO.**  \n**TERMS**  \nINV12345  \nSIGHT  \n\n---\n\n## Consignee  \n**TO THE ORDER OF TEST BANK LIMITED**'
 
 
+# ── Case 74: Clean V2.pdf ──
+def rawtext_74():
+    return '| Benefitary Name and Address | Invoice No. | Date       |\n|-----------------------------|-------------|------------|\n| CÔNG TY TNHH GIẢI PHÁP PHẦN MỀM NAM VIỆT | CTT-10052026-01 | 10/05/2026 |\n| 123 Nguyen Hue Street, Ward 1, Cao Lanh City, Dong Thap Province, Vietnam | CONTRACT NO. | TERMS |\n| | INV12345 | SIGHT |\n\n| Bill TO (Applicant Name & Address): | Consignee | |\n|----------------------------------------|-----------|--|\n| CÔNG TY CỔ PHẦN BÁN LẺ ĐIỆN MÁY SÀI GÒN | TO THE ORDER OF TEST BANK LIMITED | |\n| 45 Vo Van Kiet Boulevard, Ninh Kieu District, Can Tho City, Vietnam | | |\n\n| Goods Description | Net Weight | Unit Price (VND/KG) | Amount |\n|-------------------|-------------|---------------------|---------|\n| Supply of Barcode Scanners and POS Terminals PROFORMA INVOICE NO. SNT2652 SHIPMENT TERM: CIF | 578,503 KG | 1000.00 | 578503000.00 |\n\n| Contract No: CONT789456 | | |\n| Goods ARE OF Vietnam ORIGIN | | |\n| | TOTAL: | VND 678,503,000 |\n\nMekong Food Joint Stock Company\n\nAuthorized Signatory\n\nFor questions concerning this invoice, please contact\nCÔNG TY CỔ PHẦN BÁN LẺ ĐIỆN MÁY SÀI GÒN, 45 Vo Van Kiet Boulevard, Ninh Kieu District, Can Tho City, Vietnam'
+
+def zoomtext_74():
+    return '# INVOICE\n\n**Beneficiary Name and Address**  \n**CÔNG TY TNHH GIẢI PHÁP PHẦN MỀM NAM VIỆT**  \n123 Nguyen Hue Street,  \nWard 1, Cao Lanh City,  \nDong Thap Province,  \nVietnam  \n\n**BILL TO (Applicant Name & Address):**  \n**CÔNG TY CỔ PHẦN BÁN LẺ ĐIỆN MÁY SÀI GÒN**  \n45 Vo Van Kiet Boulevard,  \nNinh Kieu District, Can Tho City  \nVietnam  \n\n**INVOICE NO.**  \nCTT-10052026-01  \n\n**DATE**  \n10/05/2026  \n\n**CONTRACT NO.**  \nINV12345  \n\n**TERMS**  \nSIGHT  \n\n**Consignee**  \nTO THE ORDER OF TEST BANK LIMITED'
+
+
+# ── Case 75: Clean.pdf ──
+def rawtext_75():
+    return '| Beneficiary Name and Address | INVOICE NO. | DATE |\n|-----------------------------|------------|------|\n| NAM VIET SOFTWARE SOLUTIONS CO., LTD | CTT-10052026-01 | 10/05/2026 |\n| Citi view Tower, Shaheed-E-Millet 80 Road, Pakistan | CONTRACT NO. | TERMS |\n| INV12345 | SIGHT |\n\n| BILL TO (Applicant Name & Address): | Consignee | |\n|----------------------------------------|----------|--|\n| SAIGON ELECTRONICS RETAIL JOINT STOCK COMPANY | TO THE ORDER OF TEST BANK LIMITED | |\n| 100 PCT EXPORT ORIENTED UNIT, Belgium | | |\n\n| Goods Description | Net Weight | Unit Price (USD/KG) | Amount |\n|-------------------|-------------|---------------------|--------|\n| Supply of Barcode Scanners and POS Terminals PROFORMA INVOICE NO. SNT2652 SHIPMENT TERM: CIF | 578503 KG | 1000.00 | 578503000.00 |\n\n| CONTRACT NO: CONT789456 | GOODS ARE OF BELGIUM ORIGIN | SHIPPING MARK: SAIGON ELECTRONICS RETAIL JOINT ST | TOTAL: | USD 578,503,000 |\n\nSAIGON ELECTRONICS RETAIL JOINT STOCK COMPANY\n\nAuthorized Signatory\n\nFor questions concerning this invoice, please contact\n\nSAIGON ELECTRONICS RETAIL JOINT STOCK COMPANY, 100 PCT EXPORT ORIENTED UNIT, Belgium'
+
+def zoomtext_75():
+    return '# INVOICE\n\n## Beneficiary Name and Address\nNAM VIET SOFTWARE SOLUTIONS CO., LTD  \nCiti view Tower, Shaheed-E-Millet 80 Road,  \nPakistan  \n\n**INVOICE NO.**  \nCTT-10052026-01  \n\n**DATE**  \n10/05/2026  \n\n## CONTRACT NO.\nINV12345  \n\n**TERMS**  \nSIGHT  \n\n---\n\n## BILL TO (Applicant Name & Address):\nSAIGON ELECTRONICS RETAIL JOINT STOCK COMPANY  \n100 PCT EXPORT ORIENTED UNIT,  \nBelgium  \n\n**Consignee**  \nTO THE ORDER OF TEST BANK LIMITED'
+
+
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # REGISTRY
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -747,6 +765,8 @@ CASES = [
     (71, 'Invoice test (2).pdf', rawtext_71, zoomtext_71),
     (72, '19_001.pdf', rawtext_72, zoomtext_72),
     (73, '20_001.pdf', rawtext_73, zoomtext_73),
+    (74, 'Clean V2.pdf', rawtext_74, zoomtext_74),
+    (75, 'Clean.pdf', rawtext_75, zoomtext_75),
 ]
 
 if __name__ == "__main__":
