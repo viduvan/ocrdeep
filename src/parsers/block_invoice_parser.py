@@ -388,6 +388,7 @@ SELLER_LABEL_KEYS = {
     "sellerAddress": ["địa chỉ", "address",
                       # EN labels
                       "street address", "company address", "registered address",
+                      "add.", "add",
                       # Customs/shipping labels
                       "adresse line", "adresse", "address line"],
     "sellerPhoneNumber": ["điện thoại", "tel", "số điện thoại", "phone", "phone number"],
@@ -1112,6 +1113,17 @@ def parse_seller(lines: List[str], invoice: Invoice):
                                 break
                     # Also handle standard pattern with single colon
                     value = clean.split(":", 1)[-1].strip()
+                    if clean.startswith("|"):
+                        cells = [c.strip() for c in clean.split("|")]
+                        for ci, cell in enumerate(cells):
+                            if any(k in cell.lower() for k in keys):
+                                val = cell.split(":", 1)[-1].strip() if ":" in cell else ""
+                                if not val and ci + 1 < len(cells):
+                                    next_cell = cells[ci + 1].strip()
+                                    if next_cell and not next_cell.startswith("|") and next_cell != "":
+                                        val = next_cell
+                                value = val
+                                break
                     if value and ("công ty" in value.lower() or "doanh nghiệp" in value.lower() or len(value) > 5):
                         if not invoice.sellerName:
                             invoice.sellerName = value
@@ -1130,6 +1142,17 @@ def parse_seller(lines: List[str], invoice: Invoice):
                 # ===== NORMAL FIELD =====
                 if ":" in clean:
                     value = clean.split(":", 1)[-1].strip()
+                    if clean.startswith("|"):
+                        cells = [c.strip() for c in clean.split("|")]
+                        for ci, cell in enumerate(cells):
+                            if any(k in cell.lower() for k in keys):
+                                val = cell.split(":", 1)[-1].strip() if ":" in cell else ""
+                                if not val and ci + 1 < len(cells):
+                                    next_cell = cells[ci + 1].strip()
+                                    if next_cell and not next_cell.startswith("|") and next_cell != "":
+                                        val = next_cell
+                                value = val
+                                break
                     if value:
                         setattr(invoice, field, value)
                         # Keep pending for address fields to allow continuation
@@ -1159,11 +1182,23 @@ def parse_seller(lines: List[str], invoice: Invoice):
                 new_field = None
                 for f2, keys2 in SELLER_LABEL_KEYS.items():
                     if any(k in low for k in keys2):
+                        if f2 == "sellerName" and any(ref in low for ref in ["ref", "no.", "number", "id", "code"]):
+                            continue
                         new_field = f2
                         break
                 pending_field = new_field  # Set new pending, or None if no match
                 matched = True
             else:
+                _clean_val = clean
+                if clean.startswith("|"):
+                    _cells = [c.strip() for c in clean.split("|") if c.strip()]
+                    if _cells:
+                        _clean_val = _cells[0]
+                # If we are expecting address but sellerName is not set, and this first line looks like a company name
+                if pending_field == "sellerAddress" and not invoice.sellerName:
+                    if any(k in _clean_val.lower() for k in ["ltd", "co.", "co, l", "company", "corporation", "corp", "jsc", "gmbh", "limited", "công ty", "doanh nghiệp", "tnhh", "cổ phần"]):
+                        invoice.sellerName = _clean_val
+                        continue
                 current_val = getattr(invoice, pending_field, None) or ""
                 # If this line looks like email/phone, don't append to address
                 _is_email_phone = ('@' in clean or 'email' in low or '.com' in low or '.org' in low
@@ -1175,20 +1210,23 @@ def parse_seller(lines: List[str], invoice: Invoice):
                     pending_field = None
                     matched = True
                 elif current_val:
-                    # Validate phone values: must contain digits before appending
-                    if 'Phone' in pending_field:
-                        _digit_count = len(re.sub(r'[^\d]', '', clean))
-                        if _digit_count < 7:
-                            continue
-                    setattr(invoice, pending_field, current_val.rstrip(', ').rstrip(',') + ", " + clean)
+                    if _clean_val.strip().lower() in current_val.lower():
+                        pass
+                    else:
+                        # Validate phone values: must contain digits before appending
+                        if 'Phone' in pending_field:
+                            _digit_count = len(re.sub(r'[^\d]', '', _clean_val))
+                            if _digit_count < 7:
+                                continue
+                        setattr(invoice, pending_field, current_val.rstrip(', ').rstrip(',') + ", " + _clean_val)
                 else:
                     # Validate phone values: must contain enough digits
                     if 'Phone' in pending_field:
-                        _digit_count = len(re.sub(r'[^\d]', '', clean))
+                        _digit_count = len(re.sub(r'[^\d]', '', _clean_val))
                         if _digit_count < 7:
                             # Not a phone number — skip and keep pending
                             continue
-                    setattr(invoice, pending_field, clean)
+                    setattr(invoice, pending_field, _clean_val)
                     # After setting sellerName via continuation, expect address next
                     if pending_field == "sellerName":
                         pending_field = "sellerAddress"
@@ -1302,6 +1340,18 @@ def parse_buyer(block: List[str], invoice: Invoice):
                 # Check if there's a value after colon
                 if ":" in clean:
                     value = clean.split(":", 1)[-1].strip()
+                    if clean.startswith("|"):
+                        cells = [c.strip() for c in clean.split("|")]
+                        for ci, cell in enumerate(cells):
+                            if any(k in cell.lower() for k in ["company name", "consignee", "full name",
+                                                                "delivery details", "customer's details", "customer"]):
+                                val = cell.split(":", 1)[-1].strip() if ":" in cell else ""
+                                if not val and ci + 1 < len(cells):
+                                    next_cell = cells[ci + 1].strip()
+                                    if next_cell and not next_cell.startswith("|") and next_cell != "":
+                                        val = next_cell
+                                value = val
+                                break
                     # Reject pipe-table garbage (starts with |) and metadata labels
                     if (value and len(value) > 3
                             and not value.startswith('|')
@@ -1323,15 +1373,30 @@ def parse_buyer(block: List[str], invoice: Invoice):
                 continue
                 
             value = clean.split(":", 1)[-1].strip()
+            if clean.startswith("|"):
+                cells = [c.strip() for c in clean.split("|")]
+                for ci, cell in enumerate(cells):
+                    if any(k in cell.lower() for k in BUYER_LABEL_KEYS["buyerName"]):
+                        val = cell.split(":", 1)[-1].strip() if ":" in cell else ""
+                        if not val and ci + 1 < len(cells):
+                            next_cell = cells[ci + 1].strip()
+                            if next_cell and not next_cell.startswith("|") and next_cell != "":
+                                        val = next_cell
+                        value = val
+                        break
             # Skip if value contains CCCD marker or is empty/junk
             if value and "cccd" not in value.lower() and "(citizen id" not in value.lower():
                 if len(value) > 3 and not re.match(r'^[\*\s]+$', value):
                     # Reject signature labels or values containing signature instructions
                     if not any(sig in value.lower() for sig in ["ký, ghi rõ", "ký tên", "người bán", "ký bởi", "signed"]):
-                        invoice.buyerName = value
-                        pending_field = None  # Clear: name is set
+                        # Reject if value starts with another field label (e.g. "Mã số thuế: XXX")
+                        _label_prefixes = ['mã số thuế', 'địa chỉ', 'điện thoại', 'email', 'tax code', 'address', 'tel']
+                        if not any(value.lower().startswith(lp) for lp in _label_prefixes):
+                            invoice.buyerName = value
+                            pending_field = None  # Clear: name is set
             else:
-                pending_field = "buyerName"
+                if not invoice.buyerName:
+                    pending_field = "buyerName"
             matched = True
 
         # IMPORTER overrides CONSIGNEE — importer is usually the actual buyer
@@ -1355,7 +1420,19 @@ def parse_buyer(block: List[str], invoice: Invoice):
 
         #TAX CODE - support MST abbreviation
         elif "mã số thuế" in low or "tax code" in low or "mst" in low:
-            m = re.search(r"(\d{10,14}(-\d+)?)", clean)
+            _target = clean
+            if clean.startswith("|"):
+                cells = [c.strip() for c in clean.split("|")]
+                for ci, cell in enumerate(cells):
+                    if any(k in cell.lower() for k in BUYER_LABEL_KEYS["buyerTaxCode"]):
+                        val = cell.split(":", 1)[-1].strip() if ":" in cell else ""
+                        if not val and ci + 1 < len(cells):
+                            next_cell = cells[ci + 1].strip()
+                            if next_cell and not next_cell.startswith("|") and next_cell != "":
+                                        val = next_cell
+                        _target = val
+                        break
+            m = re.search(r"(\d{10,14}(-\d+)?)", _target)
             if m:
                 invoice.buyerTaxCode = m.group(1)
             pending_field = None
@@ -1373,6 +1450,17 @@ def parse_buyer(block: List[str], invoice: Invoice):
         # ADDRESS (including "Nhập tại kho" for internal transfer slips, "adresse" for French labels, "adress" for common misspelling)
         elif "địa chỉ" in low or "address" in low or "adress" in low or "nhập tại kho" in low or "adresse" in low:
             value = clean.split(":", 1)[-1].strip() if ":" in clean else ""
+            if clean.startswith("|"):
+                cells = [c.strip() for c in clean.split("|")]
+                for ci, cell in enumerate(cells):
+                    if any(k in cell.lower() for k in BUYER_LABEL_KEYS["buyerAddress"]):
+                        val = cell.split(":", 1)[-1].strip() if ":" in cell else ""
+                        if not val and ci + 1 < len(cells):
+                            next_cell = cells[ci + 1].strip()
+                            if next_cell and not next_cell.startswith("|") and next_cell != "":
+                                        val = next_cell
+                        value = val
+                        break
             if value and not invoice.buyerAddress:
                 invoice.buyerAddress = value
             elif value and invoice.buyerAddress and len(value) > len(invoice.buyerAddress):
@@ -1385,16 +1473,28 @@ def parse_buyer(block: List[str], invoice: Invoice):
 
         # PHONE (FIX TEL + FAX + Phone number)
         elif "điện thoại" in low or "tel" in low or "phone number" in low:
+            _target = clean
+            if clean.startswith("|"):
+                cells = [c.strip() for c in clean.split("|")]
+                for ci, cell in enumerate(cells):
+                    if any(k in cell.lower() for k in BUYER_LABEL_KEYS["buyerPhoneNumber"]):
+                        val = cell.split(":", 1)[-1].strip() if ":" in cell else ""
+                        if not val and ci + 1 < len(cells):
+                            next_cell = cells[ci + 1].strip()
+                            if next_cell and not next_cell.startswith("|") and next_cell != "":
+                                        val = next_cell
+                        _target = val
+                        break
             # First try: extract value after colon for international formats
-            if ":" in clean:
-                phone_val_raw = clean.split(":", 1)[-1].strip().lstrip("- ")
+            if ":" in _target:
+                phone_val_raw = _target.split(":", 1)[-1].strip().lstrip("- ")
                 if re.match(r'\+?[\d\s\-\(\)\.]{7,}$', phone_val_raw):
                     phone_clean = phone_val_raw.strip()
                     if len(re.sub(r'[^\d]', '', phone_clean)) >= 7:
                         invoice.buyerPhoneNumber = phone_clean
             # Fallback to extract_phone
             if not invoice.buyerPhoneNumber:
-                phone = extract_phone(clean)
+                phone = extract_phone(_target)
                 if phone:
                     invoice.buyerPhoneNumber = phone
             pending_field = None
@@ -1453,11 +1553,16 @@ def parse_buyer(block: List[str], invoice: Invoice):
                                                  "bank information", "payment term",
                                                  "delivery time", "weight"])
             # Stop at standalone labels (no colon) like "Phone", "Email", "Contact Person"
-            _standalone_labels = {'phone', 'email', 'tel', 'fax', 'contact person', 'address',
-                                  'company name', 'full name', 'invoice information',
-                                  'invoice date', 'invoice number', 'origin country',
-                                  'destination country', 'product details', 'financial summary'}
-            is_standalone_label = low.strip('- ') in _standalone_labels
+            _standalone_labels = {
+                'phone', 'email', 'tel', 'fax', 'contact person', 'address',
+                'company name', 'full name', 'invoice information',
+                'invoice date', 'invoice number', 'origin country',
+                'destination country', 'product details', 'financial summary',
+                'customer ref', 'customer reference', 'customer no', 'customer code',
+                'customer', 'invoicing address', 'delivery address', 'due date', 'due amount'
+            }
+            _clean_low = re.sub(r'^[#\s\-]+', '', low).strip().rstrip('.')
+            is_standalone_label = _clean_low in _standalone_labels
             # Stop at table lines, lines with colons (new labels), or if field is already long enough
             is_table_line = clean.startswith("|")
             has_colon = ":" in clean
@@ -1472,29 +1577,42 @@ def parse_buyer(block: List[str], invoice: Invoice):
                     new_field = None
                     for f2, keys2 in BUYER_LABEL_KEYS.items():
                         if any(k in low for k in keys2):
+                            if f2 == "buyerName" and any(ref in low for ref in ["ref", "no.", "number", "id", "code", "n°"]):
+                                continue
                             new_field = f2
                             break
                     pending_field = new_field
                 else:
                     pending_field = None
             else:
+                _clean_val = clean
+                if clean.startswith("|"):
+                    _cells = [c.strip() for c in clean.split("|") if c.strip()]
+                    if _cells:
+                        _clean_val = _cells[0]
+                
+                # If we are expecting address but buyerName is not set, and this first line looks like a company name
+                if pending_field == "buyerAddress" and not invoice.buyerName:
+                    if any(k in _clean_val.lower() for k in ["ltd", "co.", "co, l", "company", "corporation", "corp", "jsc", "gmbh", "limited", "công ty", "doanh nghiệp", "tnhh", "cổ phần"]):
+                        invoice.buyerName = _clean_val
+                        continue
+                
                 if current_val:
-                    # Don't append if the continuation value is the same as what's already set
-                    if current_val.strip() != clean.strip():
+                    if _clean_val.strip().lower() not in current_val.lower():
                         # Validate phone values: must contain digits before appending
                         if 'Phone' in pending_field:
-                            _digit_count = len(re.sub(r'[^\d]', '', clean))
+                            _digit_count = len(re.sub(r'[^\d]', '', _clean_val))
                             if _digit_count < 7:
                                 continue
-                        setattr(invoice, pending_field, current_val + " " + clean)
+                        setattr(invoice, pending_field, current_val + " " + _clean_val)
                 else:
                     # Validate phone values: must contain enough digits
                     if 'Phone' in pending_field:
-                        _digit_count = len(re.sub(r'[^\d]', '', clean))
+                        _digit_count = len(re.sub(r'[^\d]', '', _clean_val))
                         if _digit_count < 7:
                             # Not a phone number — skip but keep pending
                             continue
-                    setattr(invoice, pending_field, clean)
+                    setattr(invoice, pending_field, _clean_val)
                 # After setting buyerName, switch to buyerAddress for following lines
                 if pending_field == "buyerName" and not invoice.buyerAddress:
                     pending_field = "buyerAddress"
@@ -1901,7 +2019,7 @@ def parse_total(block: List[str], invoice: Invoice):
                                 break
         
         # Tiền trước thuế (PreTax) - Added specific check for summary table
-        if (any(k in l for k in ["tổng tiền hàng", "thành tiền trước thuế", "cộng tiền hàng", "subtotal"])) and "thanh toán" not in l and "total amount" not in l:
+        if (any(k in l for k in ["tổng tiền hàng", "thành tiền trước thuế", "cộng tiền hàng", "cộng tiền bán hàng", "subtotal"])) and "thanh toán" not in l and "total amount" not in l:
              val = None
              if ":" in line:
                 val_part = line.split(":")[-1].strip().strip("|")
@@ -2878,7 +2996,7 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
         
         # Pattern 5: "Customer: Pioneer Route Materials" (English invoices)
         if not invoice.buyerName:
-            m = re.search(r'[Cc]ustomer[:\s]*([^\n]+)', raw_text)
+            m = re.search(r'\b[Cc]ustomer\s*[:\-]\s*([^\n]+)', raw_text)
             if m:
                 val = m.group(1).strip().strip('*')
                 if val and len(val) > 3 and 'address' not in val.lower() and '|' not in val:
@@ -2907,7 +3025,9 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
             buyer_text = raw_text[buyer_pos:]
             m = re.search(r'[Mm]ã\s*số\s*thuế[^:]*:\s*(\d{10,14})', buyer_text)
             if m:
-                invoice.buyerTaxCode = m.group(1)
+                # Skip if this tax code is same as seller's (duplicate from seller section)
+                if m.group(1) != invoice.sellerTaxCode:
+                    invoice.buyerTaxCode = m.group(1)
     
     # ===== POST-PROCESS: Extract phone numbers embedded in address fields =====
     _phone_re = re.compile(r'[\+]?\d[\d\s\-\(\)]{7,}')
@@ -3315,7 +3435,8 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
     # ===== PIPE-TABLE: THE BENEFICIARY: | COMMERCIAL INVOICE NO & DATE: =====
     # L/C trade format: col 0 = seller info, col 1+ = invoice metadata
     _beneficiary_header_m = re.search(
-        r'\|\s*(?:THE\s+)?BENEFICIARY\s*:\s*\|.*?INVOICE\s*(?:NO\.?|NUMBER)\s*(?:&|AND)\s*DATE\s*:?\s*\|',
+        r'\|\s*(?:THE\s+)?BENEFICIARY(?:\s+NAME\s*(?:AND|&|and)?\s*ADDRESS)?\s*:?\s*\|'
+        r'.*?INVOICE\s*(?:NO\.?|NUMBER)\s*(?:\||&|AND|and|\s)+\s*DATE\s*:?\s*\|',
         clean_text, re.I
     )
     if _beneficiary_header_m:
@@ -3323,6 +3444,7 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
         _benef_rows = _after_benef.split('\n')
         _seller_parts = []
         _inv_id_found = False
+        _metadata_started = False
         for _brow in _benef_rows[:8]:
             _brow = _brow.strip()
             if not _brow or set(_brow).issubset({'|', '-', ' ', ':', '+'}):
@@ -3338,9 +3460,14 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
             if any(k in _fl for k in ['the applicant', 'applicant:', 'consignee',
                                        'description', 'port of', 'total', 'beneficiary name']):
                 break
-            # Col 0 = seller data
+            # Col 0 = seller data (only if metadata fields haven't started in other columns)
             if _first and len(_first) > 2 and ':' not in _first:
-                _seller_parts.append(_first)
+                if not _metadata_started:
+                    _seller_parts.append(_first)
+            # Flag metadata section start if columns 1+ contain labels
+            _label_kws = ['contract', 'terms', 'payment', 'vessel', 'voyage', 'port of', 'consignee', 'notify']
+            if any(any(lk in cell.lower() for lk in _label_kws) for cell in _bcells[1:]):
+                _metadata_started = True
             # Col 1+ = invoice metadata (ID, date)
             if not _inv_id_found:
                 for _bc in _bcells[1:]:
@@ -3630,7 +3757,13 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
     
     # Fallback: company name before INVOICE header (e.g., "MICRODYN-NADIR..." then "INVOICE")
     if not invoice.sellerName:
-        m = re.search(r'^([A-Z][A-Za-z \t&.,\'-]+?(?:CO\.?,?[ \t]*LTD\.?|INC\.?|CORP\.?|PTE[ \t]+LTD\.?|LLC|COMPANY(?:\s+LIMITED)?|GMBH|SAS|S\.A\.?)[. \t]*)', clean_text, re.M)
+        # Limit the search range to text before any invoice headers to avoid matching buyer/footer names
+        _first_invoice_header_idx = len(clean_text)
+        _header_m = re.search(r'\b(?:INVOICE|HÓA\s+ĐƠN|HÒA\s+ĐƠN|PROFORMA\s+INVOICE|COMMERCIAL\s+INVOICE)\b', clean_text, re.I)
+        if _header_m:
+            _first_invoice_header_idx = _header_m.start()
+        _search_text = clean_text[:_first_invoice_header_idx]
+        m = re.search(r'^([A-Z][A-Za-z \t&.,\'-]+?(?:CO\.?,?[ \t]*LTD\.?|INC\.?|CORP\.?|PTE[ \t]+LTD\.?|LLC|COMPANY(?:\s+LIMITED)?|GMBH|SAS|S\.A\.?)[. \t]*)', _search_text, re.M)
         if m:
             val = m.group(1).strip().rstrip('.')
             if len(val) > 3 and 'invoice' not in val.lower():
@@ -3740,7 +3873,7 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
     # Seller address fix: extract from ADDRESS label after SHIPPER/SELLER section
     if not invoice.sellerAddress or invoice.sellerAddress.startswith('#') or invoice.sellerAddress.startswith('|'):
         # Try finding address lines after SELLER/SHIPPER keywords
-        m = re.search(r'(?:SELLER|SHIPPER)[^\n]*\n(?:[^\n]*\n){0,10}[^\n]*ADDRESS\s*:[^\n]*\n\|\s*([^|]+)', clean_text, re.I)
+        m = re.search(r'(?:SELLER|SHIPPER)[^\n]*\n(?:[^\n]*\n){0,10}?[^\n]*ADDRESS\s*:[^\n]*\n\|\s*([^|]+)', clean_text, re.I)
         if not m:
              # Case 4 specific: table format with rows:
              # | THE SELLER: | COMMERCIAL INVOICE |
@@ -3817,7 +3950,8 @@ def pre_parse_en_commercial(raw_text: str, invoice: Invoice):
                         _after_buyer = clean_text[m.end():]
                         _buyer_rows_name = None
                         _buyer_rows_addr = []
-                        for _brow in _after_buyer.split('\n')[:6]:
+                        _lines = _after_buyer.split('\n')
+                        for _brow in _lines[1:7]:
                             _brow = _brow.strip()
                             if not _brow or set(_brow).issubset({'|', '-', ' ', ':', '+'}):
                                 continue
@@ -5325,6 +5459,16 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
         if (invoice.preTaxPrice and invoice.totalAmount and not invoice.taxAmount
                 and invoice.preTaxPrice > invoice.totalAmount):
             invoice.preTaxPrice = invoice.totalAmount
+        # Sanity check: if preTaxPrice is suspiciously small vs totalAmount (< 5%),
+        # it likely came from garbage item data (e.g. column header numbers like "6=4x5").
+        # In that case, use totalAmount as preTaxPrice for sales invoices.
+        if (invoice.preTaxPrice and invoice.totalAmount
+                and invoice.preTaxPrice < invoice.totalAmount * 0.05
+                and not invoice.taxAmount):
+            _inv_name = (invoice.invoiceName or '').lower()
+            # For "Hóa đơn bán hàng" (sales invoice) or when no tax info exists
+            if 'bán hàng' in _inv_name or not invoice.taxPercent:
+                invoice.preTaxPrice = invoice.totalAmount
         # Derive taxAmount from totalAmount - preTaxPrice
         if not invoice.taxAmount and invoice.totalAmount and invoice.preTaxPrice:
             _tax_calc = invoice.totalAmount - invoice.preTaxPrice
