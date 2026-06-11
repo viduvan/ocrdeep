@@ -245,10 +245,16 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
         low = clean.lower()
         if not clean:
             continue
+        if set(clean).issubset({'|', '-', ' ', ':', '+', '='}):
+            continue
 
         # Handle pending field from previous label-only line
         if _pending_field and ':' not in clean:
             _val = clean.strip()
+            if _val.startswith('|'):
+                _cells = [c.strip() for c in _val.split('|') if c.strip()]
+                if _cells:
+                    _val = _cells[0]
             if _pending_field == 'tax' and not invoice.sellerTaxCode:
                 m = re.search(r'[\dA-Z\-]{6,}', _val)
                 if m:
@@ -519,11 +525,15 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
             skip_keywords = ["commercial invoice", "proforma", "tax invoice",
                              "invoice", "packing list",
                              "inv.", "s/c", "payment", "transportation",
-                             "hóa đơn", "phiếu", "ngày",
+                             "hóa đơn", "hộa đơn", "phiếu", "ngày",
+                             "bán hàng",
                              "company name", "company address", "shipper", "exporter",
                              "consignee", "buyer", "importer", "bill to", "billed to",
                              "ship to", "sold to", "billed from",
                              "item no", "description of goods", "quantity", "unit price"]
+            # Also check with diacritics stripped (OCR may produce ộ instead of ó, etc.)
+            _low_no_diac = _strip_diacritics(low)
+            skip_keywords_no_diac = [_strip_diacritics(k) for k in skip_keywords]
             # Skip markdown headers and lines that match seller name
             clean_stripped = clean.lstrip('#').strip()
             # Also skip lines that look like table headers (multiple 4+ space gaps)
@@ -539,6 +549,7 @@ def _parse_en_seller(lines: List[str], invoice: Invoice) -> None:
                                 or (_seller_norm and _seller_norm in _clean_norm)
                                 or (_clean_norm and _clean_norm in _seller_norm))
             if (not any(k in low for k in skip_keywords)
+                    and not any(k in _low_no_diac for k in skip_keywords_no_diac)
                     and not clean.startswith('#')
                     and not clean.startswith('|')
                     and not is_seller_repeat
@@ -601,10 +612,16 @@ def _parse_en_buyer(lines: List[str], invoice: Invoice) -> None:
         low = clean.lower()
         if not clean:
             continue
+        if set(clean).issubset({'|', '-', ' ', ':', '+', '='}):
+            continue
 
         # Handle pending field from previous label-only line
         if _pending_field and ':' not in clean:
             _val = clean.strip()
+            if _val.startswith('|'):
+                _cells = [c.strip() for c in _val.split('|') if c.strip()]
+                if _cells:
+                    _val = _cells[0]
             if _pending_field == 'tax' and not invoice.buyerTaxCode:
                 m = re.search(r'[\dA-Z\-]{6,}', _val)
                 if m:
@@ -1012,7 +1029,7 @@ def _parse_en_header(lines: List[str], invoice: Invoice) -> None:
         invoice_type_keywords = [
             "COMMERCIAL INVOICE", "PROFORMA INVOICE", "TAX INVOICE",
             "VAT INVOICE", "PACKING LIST",
-            "HÓA ĐƠN", "HÒA ĐƠN", "PHIẾU",  # HÒA ĐƠN: OCR misspelling (Case 171)
+            "HÓA ĐƠN", "HÒA ĐƠN", "HỘA ĐƠN", "PHIẾU",  # HÒA/HỘA ĐƠN: OCR misspelling (Cases 171, 176)
         ]
         up = clean.upper()
         if any(kw in up for kw in invoice_type_keywords):
