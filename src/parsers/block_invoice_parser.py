@@ -830,14 +830,21 @@ def parse_header(block: List[str], invoice: Invoice):
             if m:
                 invoice.invoiceDate = f"{m.group(3).zfill(2)}/{m.group(2).zfill(2)}/{m.group(1)}"
         
+        # Short VN date: Ngày lập: DD/MM/YYYY or Ngày (Date): DD/MM/YYYY
+        if not invoice.invoiceDate:
+            m = re.search(r"[Nn]gày[^0-9]*(\d{1,2})/(\d{1,2})/(\d{4})", line)
+            if m:
+                invoice.invoiceDate = f"{m.group(1).zfill(2)}/{m.group(2).zfill(2)}/{m.group(3)}"
+
         # English date: Date: MM/DD/YYYY or Date: DD/MM/YYYY
         if not invoice.invoiceDate:
-            m = re.search(r"[Dd]ate[:\s]+(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})", line)
+            m = re.search(r"[Dd]ate[^0-9]*(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})", line)
             if m:
                 p1, p2, yyyy = int(m.group(1)), int(m.group(2)), m.group(3)
-                if p1 > 12:  # p1 must be day
+                is_vn = any('ngày' in l.lower() or 'hóa đơn' in l.lower() or 'hoá đơn' in l.lower() for l in block)
+                if is_vn or p1 > 12:  # Default to DD/MM/YYYY for Vietnamese invoices
                     invoice.invoiceDate = f"{str(p1).zfill(2)}/{str(p2).zfill(2)}/{yyyy}"
-                else:  # assume MM/DD/YYYY (US format)
+                else:  # assume MM/DD/YYYY (US format) for other invoices
                     invoice.invoiceDate = f"{str(p2).zfill(2)}/{str(p1).zfill(2)}/{yyyy}"
         
         # English date: DEC. 01, 2025 or Dec 1, 2025
@@ -2172,6 +2179,17 @@ def parse_global_fields(raw_text: str, invoice: Invoice):
         m = re.search(r'[Dd]ate[:\s]+(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})', raw_text)
         if m:
             invoice.invoiceDate = f"{m.group(3).zfill(2)}/{m.group(2).zfill(2)}/{m.group(1)}"
+            
+        # Pattern 1b: Date/Ngày followed by DD/MM/YYYY
+        if not invoice.invoiceDate:
+            m = re.search(r'(?:[Dd]ate|[Nn]gày)[^0-9]*(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})', raw_text)
+            if m:
+                p1, p2, yyyy = int(m.group(1)), int(m.group(2)), m.group(3)
+                is_vn = 'ngày' in raw_text.lower() or 'hóa đơn' in raw_text.lower() or 'hoá đơn' in raw_text.lower()
+                if is_vn or p1 > 12:
+                    invoice.invoiceDate = f"{str(p1).zfill(2)}/{str(p2).zfill(2)}/{yyyy}"
+                else:
+                    invoice.invoiceDate = f"{str(p2).zfill(2)}/{str(p1).zfill(2)}/{yyyy}"
         
         # Pattern 2: DEC. 01, 2025 or Dec 1, 2025 or December 01, 2025
         if not invoice.invoiceDate:
@@ -4611,9 +4629,9 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
             _yr = _m_vn.group(3) + (_m_vn.group(4) or '')
             if len(_yr) == 4:
                 invoice.invoiceDate = f"{_m_vn.group(1).zfill(2)}/{_m_vn.group(2).zfill(2)}/{_yr}"
-        # Short VN: Ngày lập: DD/MM/YYYY
+        # Short VN: Ngày lập: DD/MM/YYYY or Ngày (Date): DD/MM/YYYY
         if not invoice.invoiceDate:
-            _m_vn2 = re.search(r"[Nn]gày(?:\s+lập)?[:\s]+(\d{1,2})/(\d{1,2})/(\d{4})", _clean_date)
+            _m_vn2 = re.search(r"[Nn]gày[^0-9]*(\d{1,2})/(\d{1,2})/(\d{4})", _clean_date)
             if _m_vn2:
                 invoice.invoiceDate = f"{_m_vn2.group(1).zfill(2)}/{_m_vn2.group(2).zfill(2)}/{_m_vn2.group(3)}"
     
