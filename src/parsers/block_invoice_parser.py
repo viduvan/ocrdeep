@@ -442,6 +442,9 @@ def clean_lines(raw_text: str) -> List[str]:
     # Remove markdown bold markers **text**
     text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
     
+    # Remove markdown italic markers *text* (single asterisk)
+    text = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', r'\1', text)
+    
     # Remove markdown headers ## 
     text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
     
@@ -1853,7 +1856,22 @@ def parse_total(block: List[str], invoice: Invoice):
                     
                 if parsed_nums:
                     val = parsed_nums[-1]
-                    if val and val > 0:
+                    # Case 180: Detect tax summary table rows like "| Tổng cộng | 78.450.000 | 6.276.000 |"
+                    # where the columns are (preTaxPrice, taxAmount), NOT totalAmount.
+                    # Heuristic: if the label is just "tổng cộng" (without "thanh toán"/"payment"),
+                    # and we have exactly 2 numbers where the first matches existing preTaxPrice,
+                    # treat the second as taxAmount.
+                    _is_tax_summary = False
+                    _label_cell = cells[0].lower() if cells else ''
+                    _is_generic_total = ('tổng cộng' in _label_cell or 'total' in _label_cell)
+                    _is_payment_total = any(k in _label_cell for k in ['thanh toán', 'payment', 'tiền thanh toán'])
+                    if _is_generic_total and not _is_payment_total and len(parsed_nums) == 2:
+                        # Check if first number matches existing preTaxPrice
+                        if invoice.preTaxPrice and abs(parsed_nums[0] - invoice.preTaxPrice) < 10:
+                            invoice.taxAmount = parsed_nums[1]
+                            _is_tax_summary = True
+                    
+                    if not _is_tax_summary and val and val > 0:
                         invoice.totalAmount = val
                     else:
                         # If no number on this line, but it's a TOTAL header, look at next line
@@ -1917,6 +1935,24 @@ def parse_total(block: List[str], invoice: Invoice):
                                 invoice.taxAmount = tax_cand
                                 invoice.preTaxPrice = pre_cand
                                 invoice.totalAmount = total_cand # Ensure consistency
+                else:
+                    # Case 180: Value-on-next-line pattern:
+                    # "Tổng cộng tiền thanh toán:"
+                    # "84.726.000"
+                    # Lookahead for number on subsequent lines
+                    _is_total_label = any(k in l for k in ["tổng cộng tiền thanh toán", "tổng tiền thanh toán",
+                                                            "total payment", "total amount"])
+                    if _is_total_label:
+                        current_idx = block.index(line)
+                        for offset in range(1, 5):
+                            if current_idx + offset < len(block):
+                                next_line = block[current_idx + offset].strip()
+                                next_nums = re.findall(r'[\d\.\,]+', next_line)
+                                if next_nums:
+                                    val = safe_parse_float(next_nums[0])
+                                    if val and val > 0:
+                                        invoice.totalAmount = val
+                                    break
         
         # Also try Total payment pattern
         if any(k in l for k in ["total payment", "total value", "grand total", "net amount"]) and not invoice.totalAmount:
