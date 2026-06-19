@@ -5153,8 +5153,8 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
     # use the longer version (OCR sometimes drops leading characters)
     if invoice.sellerName and raw_text:
         sn = invoice.sellerName.strip()
-        # Look for **CompanyName** or standalone company name in text
-        for m in re.finditer(r'\*\*([^*]{5,})\*\*', raw_text):
+        # Look for **CompanyName** or standalone company name in text (single line only)
+        for m in re.finditer(r'\*\*([^*\n]{5,})\*\*', raw_text):
             candidate = m.group(1).strip()
             # Check if candidate ends with sellerName and is longer (has more leading chars)
             if (candidate.endswith(sn) and len(candidate) > len(sn)
