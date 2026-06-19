@@ -575,6 +575,8 @@ def detect_blocks(lines: List[str]) -> Dict[str, List[str]]:
         # Support English: "THE Buyer:", "CONSIGNEE" and Vietnamese: "Người mua (Buyer):", "Khách hàng:", "BÊN B (Bên mua)"
         elif any(k in l for k in [
             "khách hàng",           # Added: Vietnamese for "Customer"
+            "đơn vị mua hàng",     # Case 179: "Đơn vị mua hàng:" format
+            "đơn vị mua",          # Case 179: Partial match for buyer unit
             "họ tên người mua",
             "tên người mua",       # Added: "Tên người mua:"
             "người mua hàng",
