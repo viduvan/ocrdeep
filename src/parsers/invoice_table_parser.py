@@ -715,6 +715,22 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
                 it.quantity is not None and it.quantity > 1 and
                 not it.productName)
     ]
+    # Post-parse cross-validation: fix unitPrice where dot was misinterpreted
+    # as decimal instead of Vietnamese thousand separator.
+    # Case 182: "42.000" parsed as 42.0 instead of 42000.
+    # Check: if qty * unitPrice ≠ amount but qty * (unitPrice * 1000) ≈ amount,
+    # then the dot was a thousand separator.
+    for it in deduped:
+        if (it.quantity and it.quantity > 0 and
+                it.unitPrice is not None and it.unitPrice > 0 and
+                it.amount is not None and it.amount > 0):
+            expected = it.quantity * it.unitPrice
+            # Check if current parsing is wrong (off by ~1000x)
+            if abs(expected - it.amount) > it.amount * 0.05:  # More than 5% off
+                # Try multiplying unitPrice by 1000 (dot was thousand sep)
+                corrected = it.quantity * (it.unitPrice * 1000)
+                if abs(corrected - it.amount) < it.amount * 0.02:  # Within 2%
+                    it.unitPrice = it.unitPrice * 1000
 
     return deduped
 def parse_structured_items(raw_text: str) -> List[InvoiceItem]:
