@@ -10,6 +10,7 @@ import time
 import re
 import os
 import asyncio
+import logging
 
 from src import file_handler, config
 from src.vllm_service import stream_ocr_response, OCRTimeoutError
@@ -18,9 +19,12 @@ from src.utils.date_utils import parse_vn_date
 from src.schemas.invoice import Invoice
 from src.schemas.invoice_item import InvoiceItem
 from src.parsers.invoice_parser import normalize_invoice_output
-from src.semantic.semantic_refine import semantic_refine
 from src.parsers.block_invoice_parser import parse_invoice_block_based, parse_header
 from src.parsers.block_invoice_zoomtext_parser import parse_zoom_header, parse_zoom_right_header
+from src.extractors.llm_extractor import extract_invoice_llm
+from src.extractors.invoice_validator import InvoiceValidator
+
+logger = logging.getLogger(__name__)
 
 
 def _try_right_crop_zoom(invoice: Invoice, filepath: str, page_idx: int,
@@ -63,6 +67,104 @@ def _try_right_crop_zoom(invoice: Invoice, filepath: str, page_idx: int,
         print(f"Right-crop Zoom OCR failed: {e}")
         return ""
 
+
+
+# ── LLM-first, Regex-fallback invoice processing ─────────────────────────────
+
+def _process_invoice_page(
+    raw_text: str,
+    zoom_text: str = "",
+    page_label: str = "single",
+) -> tuple:
+    """
+    Process a single invoice page: LLM-first, regex-fallback.
+    
+    Args:
+        raw_text: Full OCR text for this page
+        zoom_text: Header zoom OCR text (if available)
+        page_label: Label for logging (e.g., "single", "page_1", "batch_file_3")
+    
+    Returns:
+        (Invoice, metadata_dict) where metadata contains:
+        - extraction_method: "llm" or "regex_fallback"
+        - validation: flags + confidence from InvoiceValidator (LLM only)
+    """
+    metadata = {"extraction_method": "llm", "validation": {}}
+    
+    # ── Step 1: Try LLM extraction ──
+    llm_result = extract_invoice_llm(raw_text, zoom_text)
+    
+    if llm_result is not None:
+        # LLM succeeded — validate and post-process
+        logger.info(f"[LLM] Extraction OK — {page_label}")
+        
+        # Validate LLM output
+        validator = InvoiceValidator()
+        llm_result = validator.validate(llm_result, raw_text, zoom_text)
+        summary = validator.get_summary(llm_result)
+        metadata["validation"] = summary
+        
+        # Date conversion
+        if isinstance(llm_result.get("invoiceDate"), str):
+            llm_result["invoiceDate"] = parse_vn_date(llm_result["invoiceDate"])
+        
+        # Fallback totalAmount from words
+        if not llm_result.get("totalAmount") and llm_result.get("invoiceTotalInWord"):
+            from src.utils.text_to_number import text_to_number_vn
+            try:
+                val = text_to_number_vn(llm_result["invoiceTotalInWord"])
+                if val > 0:
+                    llm_result["totalAmount"] = val
+                    logger.info(f"[LLM] Recovered totalAmount from words: {val}")
+            except Exception:
+                pass
+        
+        # Clean internal validator fields before Pydantic
+        llm_result.pop("_flags", None)
+        llm_result.pop("_confidence", None)
+        
+        try:
+            invoice = Invoice(**llm_result)
+            return invoice, metadata
+        except Exception as e:
+            logger.warning(f"[LLM] Pydantic validation failed, falling back to regex — {page_label}: {e}")
+    else:
+        logger.warning(f"[LLM] Extraction returned None — falling back to regex — {page_label}")
+    
+    # ── Step 2: Fallback to Regex Parser ──
+    metadata["extraction_method"] = "regex_fallback"
+    logger.info(f"[FALLBACK] Using regex parser — {page_label}")
+    
+    invoice = parse_invoice_block_based(raw_text)
+    
+    # Secondary fallback if block parser is empty
+    if not invoice.itemList and not invoice.sellerName and not invoice.buyerName:
+        invoice_data = normalize_invoice_output(raw_text)
+        invoice = Invoice(**invoice_data)
+    
+    # Apply zoom text via regex zoom parser
+    if zoom_text and zoom_text.strip():
+        zoom_lines = zoom_text.splitlines()
+        parse_zoom_header(zoom_lines, invoice)
+    
+    # Date fix
+    invoice_dict = invoice.model_dump()
+    if isinstance(invoice_dict.get("invoiceDate"), str):
+        invoice_dict["invoiceDate"] = parse_vn_date(invoice_dict["invoiceDate"])
+    
+    # Fallback totalAmount from words
+    if not invoice_dict.get("totalAmount") and invoice_dict.get("invoiceTotalInWord"):
+        from src.utils.text_to_number import text_to_number_vn
+        try:
+            val = text_to_number_vn(invoice_dict["invoiceTotalInWord"])
+            if val > 0:
+                invoice_dict["totalAmount"] = val
+                logger.info(f"[FALLBACK] Recovered totalAmount from words: {val}")
+        except Exception:
+            pass
+    
+    invoice = Invoice(**invoice_dict)
+    return invoice, metadata
 
 
 
@@ -149,7 +251,7 @@ def run_vision_ocr(
 
         table_guard = None
         if ocr_mode == "markdown":
-            table_guard = TableGuard(max_rows=10, max_consecutive_empty_rows=2)
+            table_guard = TableGuard(max_rows=150, max_consecutive_empty_rows=4)
 
         chunks: List[str] = []
         start_time = time.time()
@@ -267,84 +369,37 @@ async def detect_single_invoice_ocr(
             actual_page_indices = ocr_result.get("page_indices", list(range(len(page_texts))))
             
             invoices = []
+            all_metadata = []
             for arr_idx, page_text in enumerate(page_texts):
                 actual_page_idx = actual_page_indices[arr_idx] if arr_idx < len(actual_page_indices) else arr_idx
                 
-                invoice = parse_invoice_block_based(page_text)
-                
-                if not invoice.itemList and not invoice.sellerName and not invoice.buyerName:
-                    invoice_data = normalize_invoice_output(page_text)
-                    invoice = Invoice(**invoice_data)
-                
-                # Per-page zoom-in
-                missing_fields = []
-                if not invoice.invoiceID or len(str(invoice.invoiceID)) < 3:
-                    missing_fields.append("invoiceID")
-                if not invoice.invoiceSerial:
-                    missing_fields.append("invoiceSerial")
-                form_no = (invoice.invoiceFormNo or "").lower()
-                if not invoice.invoiceFormNo or "điều" in form_no or "mẫu" in form_no:
-                    missing_fields.append("invoiceFormNo")
-                if not invoice.sellerName:
-                    missing_fields.append("sellerName")
-                if not invoice.buyerName:
-                    missing_fields.append("buyerName")
-                
-                if missing_fields:
-                    print(f"Page {actual_page_idx + 1}: Missing {missing_fields} - Triggering Zoom-in...")
-                    header_bytes = file_handler.get_header_crop_bytes_page(str(temp_file), actual_page_idx)
-                    if header_bytes:
-                        zoom_prompt = config.PROMPTS.get("header_only", "Extract header info.")
-                        zoom_chunks = []
-                        try:
-                            for chunk in stream_ocr_response(
-                                model_name=model_name,
-                                prompt=zoom_prompt,
-                                image_bytes=header_bytes,
-                                options=config.INFERENCE_PARAMS,
-                                timeout_seconds=config.ZOOM_OCR_TIMEOUT_SECONDS,
-                            ):
-                                if chunk:
-                                    zoom_chunks.append(chunk)
-                            
-                            zoom_text = "".join(zoom_chunks).strip()
-                            from src.parsers.block_invoice_zoomtext_parser import parse_zoom_header
-                            zoom_lines = zoom_text.splitlines()
-                            parse_zoom_header(zoom_lines, invoice)
-                            
-                        except Exception as e:
-                            print(f"Page {actual_page_idx + 1} Zoom-in OCR failed: {e}")
-                
-                    # Right-crop zoom: extract invoiceID from overlapping header text
-                    right_text = _try_right_crop_zoom(invoice, str(temp_file), actual_page_idx, model_name)
-                
-                # Convert to dict and refine
-                from pydantic import BaseModel
-                if isinstance(invoice, BaseModel):
-                    invoice_dict = invoice.model_dump()
-                else:
-                    invoice_dict = invoice
-                
-                if semantic:
-                    invoice_dict = semantic_refine(
-                        raw_text=page_text,
-                        invoice=invoice_dict,
-                    )
-                
-                if isinstance(invoice_dict.get("invoiceDate"), str):
-                    parsed = parse_vn_date(invoice_dict["invoiceDate"])
-                    invoice_dict["invoiceDate"] = parsed
-                
-                if not invoice_dict.get("totalAmount") and invoice_dict.get("invoiceTotalInWord"):
-                    from src.utils.text_to_number import text_to_number_vn
+                # Zoom-in OCR for this page (get text only, pass to LLM)
+                page_zoom_text = ""
+                header_bytes = file_handler.get_header_crop_bytes_page(str(temp_file), actual_page_idx)
+                if header_bytes:
+                    zoom_prompt = config.PROMPTS.get("header_only", "Extract header info.")
+                    zoom_chunks = []
                     try:
-                        val = text_to_number_vn(invoice_dict["invoiceTotalInWord"])
-                        if val > 0:
-                            invoice_dict["totalAmount"] = val
-                    except:
-                        pass
+                        for chunk in stream_ocr_response(
+                            model_name=model_name,
+                            prompt=zoom_prompt,
+                            image_bytes=header_bytes,
+                            options=config.INFERENCE_PARAMS,
+                            timeout_seconds=config.ZOOM_OCR_TIMEOUT_SECONDS,
+                        ):
+                            if chunk:
+                                zoom_chunks.append(chunk)
+                        page_zoom_text = "".join(zoom_chunks).strip()
+                    except Exception as e:
+                        logger.warning(f"Page {actual_page_idx + 1} Zoom-in OCR failed: {e}")
                 
-                invoices.append(Invoice(**invoice_dict))
+                # Process page through LLM-first pipeline
+                invoice, page_meta = _process_invoice_page(
+                    page_text, page_zoom_text,
+                    page_label=f"page_{actual_page_idx + 1}",
+                )
+                invoices.append(invoice)
+                all_metadata.append(page_meta)
             
             result_data = {
                 "filename": file.filename,
@@ -352,6 +407,7 @@ async def detect_single_invoice_ocr(
                 "ocr_mode": ocr_mode,
                 "page_count": page_count,
                 "raw_text": raw_text,
+                "extraction_metadata": all_metadata,
                 "data": invoices,
             }
             if ocr_result.get("timed_out"):
@@ -359,125 +415,42 @@ async def detect_single_invoice_ocr(
             return result_data
 
         # ---- SINGLE PAGE HANDLING ----
-        invoice = parse_invoice_block_based(raw_text)
+        # Zoom-in OCR: get header crop text
+        zoom_text = ""
+        selected_page_indices = ocr_result.get("page_indices", [0])
+        zoom_page_idx = selected_page_indices[0] if selected_page_indices else 0
+        header_bytes = file_handler.get_header_crop_bytes_page(str(temp_file), zoom_page_idx)
+        if header_bytes:
+            zoom_prompt = config.PROMPTS.get("header_only", "Extract header info.")
+            zoom_chunks = []
+            try:
+                for chunk in stream_ocr_response(
+                    model_name=model_name,
+                    prompt=zoom_prompt,
+                    image_bytes=header_bytes,
+                    options=config.INFERENCE_PARAMS,
+                    timeout_seconds=config.ZOOM_OCR_TIMEOUT_SECONDS,
+                ):
+                    if chunk: zoom_chunks.append(chunk)
+                zoom_text = "".join(zoom_chunks).strip()
+                if zoom_text:
+                    logger.info(f"Zoom-in Text (first 100): {zoom_text[:100]}...")
+            except Exception as e:
+                logger.warning(f"Zoom-in OCR failed: {e}")
 
-        if not invoice.itemList and not invoice.sellerName and not invoice.buyerName:
-            invoice_data = normalize_invoice_output(raw_text)
-            invoice = Invoice(**invoice_data)
-
-        # Header zoom-in
-        missing_fields = []
-        if not invoice.invoiceID or len(str(invoice.invoiceID)) < 3: 
-            missing_fields.append("invoiceID (missing/short)")
-        if not invoice.invoiceSerial: 
-            missing_fields.append("invoiceSerial")
-        
-        form_no = (invoice.invoiceFormNo or "").lower()
-        if not invoice.invoiceFormNo or "điều" in form_no or "mẫu" in form_no: 
-            missing_fields.append("invoiceFormNo (missing/suspicious)")
-        
-        if not invoice.invoiceDate: 
-            missing_fields.append("invoiceDate")
-            
-        name_upper = (invoice.invoiceName or "").upper()
-        valid_titles = ["HÓA ĐƠN", "PHIẾU", "RECEIPT", "INVOICE"]
-        if not invoice.invoiceName or \
-           not any(t in name_upper for t in valid_titles) or \
-           invoice.invoiceName.strip().startswith("(") or \
-           "BẢN THỂ HIỆN" in name_upper or "BẢN SAO" in name_upper:
-             missing_fields.append("invoiceName (missing/suspicious)")
-        
-        if not invoice.sellerName:
-            missing_fields.append("sellerName")
-        if not invoice.buyerName:
-            missing_fields.append("buyerName")
-
-        if missing_fields:
-            print(f"Missing header fields {missing_fields} - Triggering Zoom-in Pass...")
-            selected_page_indices = ocr_result.get("page_indices", [0])
-            zoom_page_idx = selected_page_indices[0] if selected_page_indices else 0
-            header_bytes = file_handler.get_header_crop_bytes_page(str(temp_file), zoom_page_idx)
-            if header_bytes:
-                zoom_prompt = config.PROMPTS.get("header_only", "Extract header info.")
-                zoom_chunks = []
-                try:
-                    for chunk in stream_ocr_response(
-                        model_name=model_name,
-                        prompt=zoom_prompt,
-                        image_bytes=header_bytes,
-                        options=config.INFERENCE_PARAMS,
-                        timeout_seconds=config.ZOOM_OCR_TIMEOUT_SECONDS,
-                    ):
-                        if chunk: zoom_chunks.append(chunk)
-                    
-                    zoom_text = "".join(zoom_chunks).strip()
-                    print(f"Zoom-in Text: {zoom_text[:100]}...")
-
-                    from src.parsers.block_invoice_zoomtext_parser import parse_zoom_header
-                    zoom_lines = zoom_text.splitlines()
-                    
-                    print(f"DEBUG: Before Zoom Parse ID: {invoice.invoiceID}")
-                    parse_zoom_header(zoom_lines, invoice)
-                    print(f"DEBUG: After Zoom Parse ID: {invoice.invoiceID}")
-                    
-                    if zoom_text:
-                        raw_text += f"\n\n--- ZOOM TEXT ---\n{zoom_text}"
-                        
-                        if not invoice.sellerName:
-                            import re
-                            m = re.search(r"(?:Đơn vị bán hàng|Seller)[^:]*:\s*(.+)", zoom_text, re.I)
-                            if m:
-                                invoice.sellerName = m.group(1).strip()
-                        if not invoice.sellerTaxCode:
-                            import re
-                            m = re.search(r"(?:Mã số thuế|Tax code)[^:]*:\s*(\d{10,14})", zoom_text, re.I)
-                            if m:
-                                invoice.sellerTaxCode = m.group(1)
-
-                except Exception as e:
-                    print(f"Zoom-in OCR failed: {e}")
-                    raw_text += f"\n\n--- ZOOM ERROR ---\n{e}"
-
-            # Right-crop zoom: extract invoiceID from overlapping header text
-            right_text = _try_right_crop_zoom(invoice, str(temp_file), zoom_page_idx, model_name)
-            if right_text:
-                raw_text += f"\n\n--- ZOOM RIGHT ---\n{right_text}"
-
-        # Semantic refine
-        if semantic:
-            from pydantic import BaseModel
-
-            if isinstance(invoice, BaseModel):
-                invoice_dict = invoice.model_dump()
-            else:
-                invoice_dict = invoice
-
-            invoice_dict = semantic_refine(
-                raw_text=raw_text,
-                invoice=invoice_dict,
-            )
-            
-            if isinstance(invoice_dict.get("invoiceDate"), str):
-                parsed = parse_vn_date(invoice_dict["invoiceDate"])
-                invoice_dict["invoiceDate"] = parsed
-
-            if not invoice_dict.get("totalAmount") and invoice_dict.get("invoiceTotalInWord"):
-                from src.utils.text_to_number import text_to_number_vn
-                try:
-                    val = text_to_number_vn(invoice_dict["invoiceTotalInWord"])
-                    if val > 0:
-                        invoice_dict["totalAmount"] = val
-                        print(f"Recovered totalAmount from words: {val}")
-                except Exception as e:
-                    print(f"Failed to convert words to number: {e}")
-
-            invoice = Invoice(**invoice_dict)
+        # Process through LLM-first pipeline
+        invoice, extraction_meta = _process_invoice_page(
+            raw_text, zoom_text,
+            page_label=f"single/{file.filename}",
+        )
 
         # Build result
         result_data = {
             "filename": file.filename,
             "duration_sec": ocr_result["duration_sec"],
             "ocr_mode": ocr_mode,
+            "extraction_method": extraction_meta["extraction_method"],
+            "validation": extraction_meta.get("validation", {}),
             "raw_text": raw_text,
             "data": invoice,
         }
@@ -493,6 +466,7 @@ async def detect_single_invoice_ocr(
             "duration_sec": round(elapsed, 2),
             "data": None
         }
+
 
 
 
@@ -557,251 +531,97 @@ async def detect_invoice_ocr(
             page_count = ocr_result.get("page_count", 1)
 
             # ---- MULTI-PAGE PDF HANDLING ----
-            # If multiple pages, split by page markers and parse each as separate invoice
             if page_count > 1:
                 import re
-                # Split by "--- PAGE N ---" markers
                 page_texts = re.split(r'--- PAGE \d+ ---\n?', raw_text)
-                page_texts = [p.strip() for p in page_texts if p.strip()]  # Remove empty
+                page_texts = [p.strip() for p in page_texts if p.strip()]
                 
-                # Get actual page indices (0-indexed) from OCR result
                 actual_page_indices = ocr_result.get("page_indices", list(range(len(page_texts))))
                 
                 invoices = []
+                all_page_meta = []
                 for arr_idx, page_text in enumerate(page_texts):
-                    # Get the ACTUAL PDF page index (0-indexed) for this page
                     actual_page_idx = actual_page_indices[arr_idx] if arr_idx < len(actual_page_indices) else arr_idx
                     
-                    # Parse each page as a separate invoice
-                    invoice = parse_invoice_block_based(page_text)
-                    
-                    # Fallback if block parser empty
-                    if not invoice.itemList and not invoice.sellerName and not invoice.buyerName:
-                        invoice_data = normalize_invoice_output(page_text)
-                        invoice = Invoice(**invoice_data)
-                    
-                    # ---- PER-PAGE ZOOM-IN STRATEGY ----
-                    # Check if critical header fields are missing
-                    missing_fields = []
-                    if not invoice.invoiceID or len(str(invoice.invoiceID)) < 3:
-                        missing_fields.append("invoiceID")
-                    if not invoice.invoiceSerial:
-                        missing_fields.append("invoiceSerial")
-                    form_no = (invoice.invoiceFormNo or "").lower()
-                    if not invoice.invoiceFormNo or "điều" in form_no or "mẫu" in form_no:
-                        missing_fields.append("invoiceFormNo")
-                    if not invoice.sellerName:
-                        missing_fields.append("sellerName")
-                    if not invoice.buyerName:
-                        missing_fields.append("buyerName")
-                    
-                    if missing_fields:
-                        # Use 1-indexed for display, but actual_page_idx is 0-indexed for function call
-                        print(f"Page {actual_page_idx + 1}: Missing {missing_fields} - Triggering Zoom-in...")
-                        # Get header crop for the ACTUAL PDF page
-                        header_bytes = file_handler.get_header_crop_bytes_page(str(temp_file), actual_page_idx)
-                        if header_bytes:
-                            zoom_prompt = config.PROMPTS.get("header_only", "Extract header info.")
-                            zoom_chunks = []
-                            try:
-                                for chunk in stream_ocr_response(
-                                    model_name=model_name,
-                                    prompt=zoom_prompt,
-                                    image_bytes=header_bytes,
-                                    options=config.INFERENCE_PARAMS,
-                                    timeout_seconds=config.ZOOM_OCR_TIMEOUT_SECONDS,
-                                ):
-                                    if chunk:
-                                        zoom_chunks.append(chunk)
-                                
-                                zoom_text = "".join(zoom_chunks).strip()
-                                print(f"Page {actual_page_idx + 1} Zoom Text: {zoom_text[:80]}...")
-                                
-                                # Parse zoom text to fill missing fields
-                                from src.parsers.block_invoice_zoomtext_parser import parse_zoom_header
-                                zoom_lines = zoom_text.splitlines()
-                                parse_zoom_header(zoom_lines, invoice)
-                                
-                            except Exception as e:
-                                print(f"Page {actual_page_idx + 1} Zoom-in OCR failed: {e}")
-                    
-                        # Right-crop zoom: extract invoiceID from overlapping header text
-                        right_text = _try_right_crop_zoom(invoice, str(temp_file), actual_page_idx, model_name)
-                    
-                    # Convert to dict for semantic refine
-                    from pydantic import BaseModel
-                    if isinstance(invoice, BaseModel):
-                        invoice_dict = invoice.model_dump()
-                    else:
-                        invoice_dict = invoice
-                    
-                    # Semantic refine
-                    if semantic:
-                        invoice_dict = semantic_refine(
-                            raw_text=page_text,
-                            invoice=invoice_dict,
-                        )
-                    
-                    # Fix date
-                    if isinstance(invoice_dict.get("invoiceDate"), str):
-                        parsed = parse_vn_date(invoice_dict["invoiceDate"])
-                        invoice_dict["invoiceDate"] = parsed
-                    
-                    # Fallback total from words
-                    if not invoice_dict.get("totalAmount") and invoice_dict.get("invoiceTotalInWord"):
-                        from src.utils.text_to_number import text_to_number_vn
+                    # Zoom-in OCR for this page
+                    page_zoom_text = ""
+                    header_bytes = file_handler.get_header_crop_bytes_page(str(temp_file), actual_page_idx)
+                    if header_bytes:
+                        zoom_prompt = config.PROMPTS.get("header_only", "Extract header info.")
+                        zoom_chunks = []
                         try:
-                            val = text_to_number_vn(invoice_dict["invoiceTotalInWord"])
-                            if val > 0:
-                                invoice_dict["totalAmount"] = val
-                        except:
-                            pass
+                            for chunk in stream_ocr_response(
+                                model_name=model_name,
+                                prompt=zoom_prompt,
+                                image_bytes=header_bytes,
+                                options=config.INFERENCE_PARAMS,
+                                timeout_seconds=config.ZOOM_OCR_TIMEOUT_SECONDS,
+                            ):
+                                if chunk:
+                                    zoom_chunks.append(chunk)
+                            page_zoom_text = "".join(zoom_chunks).strip()
+                        except Exception as e:
+                            logger.warning(f"Batch {file.filename} page {actual_page_idx + 1} Zoom failed: {e}")
                     
-                    invoices.append(Invoice(**invoice_dict))
+                    # Process page through LLM-first pipeline
+                    invoice, page_meta = _process_invoice_page(
+                        page_text, page_zoom_text,
+                        page_label=f"batch/{file.filename}/page_{actual_page_idx + 1}",
+                    )
+                    invoices.append(invoice)
+                    all_page_meta.append(page_meta)
                 
-                return {
+                result_data = {
+                    "filename": file.filename,
                     "duration_sec": ocr_result["duration_sec"],
                     "ocr_mode": ocr_mode,
                     "page_count": page_count,
                     "raw_text": raw_text,
-                    "data": invoices,  # Array of invoices
+                    "extraction_metadata": all_page_meta,
+                    "data": invoices,
                 }
+                if ocr_result.get("timed_out"):
+                    result_data["warning"] = f"OCR timeout - partial results (limit: {per_file_timeout}s)"
+                all_results.append(result_data)
+                continue
 
-            # ---- SINGLE PAGE HANDLING (Original Logic) ----
-            # invoice = normalize_invoice_output(raw_text)
-            # PARSE INVOICE (BLOCK-BASED FIRST)
-            invoice = parse_invoice_block_based(raw_text)
+            # ---- SINGLE PAGE HANDLING ----
+            # Zoom-in OCR: get header crop text
+            zoom_text = ""
+            selected_page_indices = ocr_result.get("page_indices", [0])
+            zoom_page_idx = selected_page_indices[0] if selected_page_indices else 0
+            header_bytes = file_handler.get_header_crop_bytes_page(str(temp_file), zoom_page_idx)
+            if header_bytes:
+                zoom_prompt = config.PROMPTS.get("header_only", "Extract header info.")
+                zoom_chunks = []
+                try:
+                    for chunk in stream_ocr_response(
+                        model_name=model_name,
+                        prompt=zoom_prompt,
+                        image_bytes=header_bytes,
+                        options=config.INFERENCE_PARAMS,
+                        timeout_seconds=config.ZOOM_OCR_TIMEOUT_SECONDS,
+                    ):
+                        if chunk: zoom_chunks.append(chunk)
+                    zoom_text = "".join(zoom_chunks).strip()
+                    if zoom_text:
+                        logger.info(f"Batch {file.filename} Zoom-in Text (first 100): {zoom_text[:100]}...")
+                except Exception as e:
+                    logger.warning(f"Batch {file.filename} Zoom-in OCR failed: {e}")
 
-            # Fallback nếu block parser quá rỗng (an toàn)
-            if not invoice.itemList and not invoice.sellerName and not invoice.buyerName:
-                invoice_data = normalize_invoice_output(raw_text)
-                invoice = Invoice(**invoice_data)
+            # Process through LLM-first pipeline
+            invoice, extraction_meta = _process_invoice_page(
+                raw_text, zoom_text,
+                page_label=f"batch/{file.filename}",
+            )
 
-            # ---- HEADER ZOOM-IN STRATEGY ----
-            # Optimize: Only run zoom if we are missing critical fields.
-            # User request: "If first pass has ID, Serial, and FormNo, skip crop".
-            # So we trigger if ANY of these are missing.
-            missing_fields = []
-            if not invoice.invoiceID or len(str(invoice.invoiceID)) < 3: 
-                missing_fields.append("invoiceID (missing/short)")
-            if not invoice.invoiceSerial: missing_fields.append("invoiceSerial")
-            
-            form_no = (invoice.invoiceFormNo or "").lower()
-            if not invoice.invoiceFormNo or "điều" in form_no or "mẫu" in form_no: 
-                missing_fields.append("invoiceFormNo (missing/suspicious)")
-            
-            # Also trigger if Date is missing or Name is suspicious
-            if not invoice.invoiceDate: 
-                missing_fields.append("invoiceDate")
-                
-            name_upper = (invoice.invoiceName or "").upper()
-            # Trigger if name is missing, doesn't contain standard keywords, or starts with "(" (footer text)
-            valid_titles = ["HÓA ĐƠN", "PHIẾU", "RECEIPT", "INVOICE"]
-            if not invoice.invoiceName or \
-               not any(t in name_upper for t in valid_titles) or \
-               invoice.invoiceName.strip().startswith("(") or \
-               "BẢN THỂ HIỆN" in name_upper or "BẢN SAO" in name_upper:
-                 missing_fields.append("invoiceName (missing/suspicious)")
-
-            if missing_fields:
-                print(f"Missing header fields {missing_fields} - Triggering Zoom-in Pass...")
-                # Use correct page index for zoom (might be a selected page from multi-page PDF)
-                selected_page_indices = ocr_result.get("page_indices", [0])
-                zoom_page_idx = selected_page_indices[0] if selected_page_indices else 0
-                header_bytes = file_handler.get_header_crop_bytes_page(str(temp_file), zoom_page_idx)
-                if header_bytes:
-                    # Pass 2: OCR on header crop
-                    # Use a specific prompt for header fields
-                    zoom_prompt = config.PROMPTS.get("header_only", "Extract header info.")
-                    zoom_chunks = []
-                    try:
-                        for chunk in stream_ocr_response(
-                            model_name=model_name,
-                            prompt=zoom_prompt,
-                            image_bytes=header_bytes,
-                            options=config.INFERENCE_PARAMS,
-                            timeout_seconds=config.ZOOM_OCR_TIMEOUT_SECONDS,  # Shorter timeout for zoom
-                        ):
-                            if chunk: zoom_chunks.append(chunk)
-                        
-                        zoom_text = "".join(zoom_chunks).strip()
-                        print(f"Zoom-in Text: {zoom_text[:100]}...") # Debug log
-                        
-
-                        # Parse header fields from zoom text using DEDICATED ZOOM PARSER
-                        from src.parsers.block_invoice_zoomtext_parser import parse_zoom_header
-                        
-                        save_text = zoom_text
-                        zoom_lines = zoom_text.splitlines()
-                        
-                        print(f"DEBUG: Before Zoom Parse ID: {invoice.invoiceID}")
-                        parse_zoom_header(zoom_lines, invoice)
-                        print(f"DEBUG: After Zoom Parse ID: {invoice.invoiceID}")
-                        
-                        # DEBUG: Append zoom text to raw_text so user can inspect it
-                        if zoom_text:
-                            raw_text += f"\n\n--- ZOOM TEXT ---\n{zoom_text}"
-                            
-                            # === SELLER FALLBACK FROM ZOOM TEXT ===
-                            # For internal transfer slips, seller info is in ZOOM TEXT
-                            if not invoice.sellerName:
-                                import re
-                                m = re.search(r"(?:Đơn vị bán hàng|Seller)[^:]*:\s*(.+)", zoom_text, re.I)
-                                if m:
-                                    invoice.sellerName = m.group(1).strip()
-                            if not invoice.sellerTaxCode:
-                                import re
-                                m = re.search(r"(?:Mã số thuế|Tax code)[^:]*:\s*(\d{10,14})", zoom_text, re.I)
-                                if m:
-                                    invoice.sellerTaxCode = m.group(1)
-
-                    except Exception as e:
-                        print(f"Zoom-in OCR failed: {e}")
-                        raw_text += f"\n\n--- ZOOM ERROR ---\n{e}"
-
-                # Right-crop zoom: extract invoiceID from overlapping header text
-                right_text = _try_right_crop_zoom(invoice, str(temp_file), zoom_page_idx, model_name)
-                if right_text:
-                    raw_text += f"\n\n--- ZOOM RIGHT ---\n{right_text}"
-
-            #SEMANTIC REFINE (CHỈ FIELD NULL)
-            if semantic:
-                from pydantic import BaseModel
-
-                if isinstance(invoice, BaseModel):
-                    invoice_dict = invoice.model_dump()
-                else:
-                    invoice_dict = invoice
-
-                invoice_dict = semantic_refine(
-                    raw_text=raw_text,
-                    invoice=invoice_dict,
-                )
-                # fix date fields BEFORE Invoice validation
-                if isinstance(invoice_dict.get("invoiceDate"), str):
-                    parsed = parse_vn_date(invoice_dict["invoiceDate"])
-                    invoice_dict["invoiceDate"] = parsed
-
-                # Fallback: Convert TotalInWord to Number if totalAmount is missing
-                if not invoice_dict.get("totalAmount") and invoice_dict.get("invoiceTotalInWord"):
-                    from src.utils.text_to_number import text_to_number_vn
-                    try:
-                        val = text_to_number_vn(invoice_dict["invoiceTotalInWord"])
-                        if val > 0:
-                            invoice_dict["totalAmount"] = val
-                            print(f"Recovered totalAmount from words: {val}")
-                    except Exception as e:
-                        print(f"Failed to convert words to number: {e}")
-
-                invoice = Invoice(**invoice_dict)
-
-
-
-            # Build result - include timed_out flag if OCR hit timeout (but still has partial data)
+            # Build result
             result_data = {
                 "filename": file.filename,
                 "duration_sec": ocr_result["duration_sec"],
                 "ocr_mode": ocr_mode,
+                "extraction_method": extraction_meta["extraction_method"],
+                "validation": extraction_meta.get("validation", {}),
                 "raw_text": raw_text,
                 "data": invoice,
             }
