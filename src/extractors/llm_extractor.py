@@ -7,20 +7,17 @@ Usage:
     result = extract_invoice_llm(raw_text)
 """
 import json
-import os
 import re
+import time
 import logging
 from typing import Optional
 
+import openai
 from openai import OpenAI
 
-logger = logging.getLogger(__name__)
+from src import config
 
-# ── FPT Cloud Configuration ──────────────────────────────────────────────────
-FPT_API_BASE = os.getenv("FPT_API_BASE", "https://mkp-api.fptcloud.com/v1")
-FPT_API_KEY = os.getenv("FPT_API_KEY", "")
-FPT_MODEL = os.getenv("FPT_MODEL", "Qwen3-32B")
-FPT_TIMEOUT = int(os.getenv("FPT_TIMEOUT", "60"))
+logger = logging.getLogger(__name__)
 
 # ── System Prompt ─────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """You are an expert invoice/commercial document data extractor.
@@ -182,15 +179,15 @@ IMPORTANT: Return ONLY the JSON object. No markdown, no code fences, no explanat
 
 def _get_fpt_client() -> OpenAI:
     """Create OpenAI-compatible client for FPT Cloud."""
-    api_key = FPT_API_KEY
+    api_key = config.FPT_API_KEY
     if not api_key:
         raise ValueError(
-            "FPT_API_KEY not set. Export it: export FPT_API_KEY='your-key'"
+            "FPT_API_KEY not set. Export it or add to .env file: FPT_API_KEY='your-key'"
         )
     return OpenAI(
-        base_url=FPT_API_BASE,
+        base_url=config.FPT_API_BASE,
         api_key=api_key,
-        timeout=FPT_TIMEOUT,
+        timeout=config.FPT_TIMEOUT,
     )
 
 
@@ -267,14 +264,18 @@ def extract_invoice_llm(
         max_tokens: Max output tokens
         
     Returns:
-        dict with invoice fields, or None if extraction failed
+        dict with invoice fields, or None if extraction failed.
+        Returns None on ANY error — caller should fallback to regex.
     """
-    model = model or FPT_MODEL
+    model = model or config.FPT_MODEL
+    text_len = len(raw_text) + len(zoom_text or "")
     
     # Combine raw text and zoom text for maximum context
     user_content = f"Extract invoice data from this OCR text:\n\n{raw_text}"
     if zoom_text and zoom_text.strip():
         user_content += f"\n\n--- ADDITIONAL HEADER DETAIL (ZOOMED-IN) ---\n{zoom_text}"
+    
+    start_time = time.time()
     
     try:
         client = _get_fpt_client()
@@ -291,29 +292,49 @@ def extract_invoice_llm(
             stream=False,
         )
         
+        latency = time.time() - start_time
+        
         raw_response = response.choices[0].message.content
         if not raw_response:
-            logger.error("LLM returned empty response")
+            logger.error(f"[LLM] Empty response from {model} (latency={latency:.1f}s, input={text_len} chars)")
             return None
         
         result = _parse_llm_json(raw_response)
         if result is None:
-            logger.error("Failed to parse LLM response as JSON")
+            logger.warning(f"[LLM] JSON parse failed — model={model}, latency={latency:.1f}s, response_preview={raw_response[:200]}")
             return None
         
         # Post-processing: clean template placeholders
         result = _clean_placeholder_values(result)
         
         logger.info(
-            f"LLM extraction successful: "
+            f"[LLM] Extraction OK — model={model}, latency={latency:.1f}s, "
             f"invoiceID={result.get('invoiceID')}, "
             f"totalAmount={result.get('totalAmount')}, "
             f"items={len(result.get('itemList', []))}"
         )
         return result
-        
+    
+    except ValueError as e:
+        # FPT_API_KEY not set
+        logger.error(f"[LLM] API key not configured: {e}")
+        return None
+    except openai.AuthenticationError as e:
+        logger.error(f"[LLM] Auth failed (key expired/invalid) — base_url={config.FPT_API_BASE}: {e}")
+        return None
+    except openai.APIConnectionError as e:
+        logger.error(f"[LLM] Connection failed to {config.FPT_API_BASE}: {e}")
+        return None
+    except openai.APITimeoutError as e:
+        latency = time.time() - start_time
+        logger.error(f"[LLM] Timeout after {latency:.1f}s (limit={config.FPT_TIMEOUT}s) — model={model}: {e}")
+        return None
+    except openai.RateLimitError as e:
+        logger.error(f"[LLM] Rate limit exceeded — model={model}: {e}")
+        return None
     except Exception as e:
-        logger.error(f"LLM extraction failed: {type(e).__name__}: {e}")
+        latency = time.time() - start_time
+        logger.error(f"[LLM] Unexpected error — {type(e).__name__}: {e} (model={model}, latency={latency:.1f}s)")
         return None
 
 
