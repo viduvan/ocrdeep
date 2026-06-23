@@ -37,3 +37,11 @@ ZOOM_OCR_TIMEOUT_SECONDS = 30
 
 # Per-page timeout for multi-page PDF OCR (each page gets this much time)
 MULTIPAGE_OCR_TIMEOUT_SECONDS = 45
+
+# ── FPT Cloud LLM Configuration ─────────────────────────────────────
+# Used by src/extractors/llm_extractor.py for invoice data extraction
+# Can be overridden by environment variables (e.g., via .env file in Docker)
+FPT_API_BASE = os.getenv("FPT_API_BASE", "https://mkp-api.fptcloud.com/v1")
+FPT_API_KEY = os.getenv("FPT_API_KEY", "")
+FPT_MODEL = os.getenv("FPT_MODEL", "Qwen3-32B")
+FPT_TIMEOUT = int(os.getenv("FPT_TIMEOUT", "60"))
