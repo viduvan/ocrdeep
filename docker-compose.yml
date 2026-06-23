@@ -47,6 +47,12 @@ services:
     environment:
       - VLLM_HOST=http://vllm:8000/v1
       - VLLM_MODEL=deepseek-ai/DeepSeek-OCR
+      # FPT Cloud LLM — reads from .env file
+      - FPT_API_KEY=${FPT_API_KEY:-}
+      - FPT_API_BASE=${FPT_API_BASE:-https://mkp-api.fptcloud.com/v1}
+      - FPT_MODEL=${FPT_MODEL:-Qwen3-32B}
+      - FPT_TIMEOUT=${FPT_TIMEOUT:-60}
+
     depends_on:
       vllm:
         condition: service_healthy
