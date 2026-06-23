@@ -1494,6 +1494,53 @@ def zoomtext_178():
     return '# HÓA ĐƠN GIÁ TRỊ GIA TĂNG  \n*(Bản thể hiện của hóa đơn điện tử)*  \nNgày 10 tháng 06 năm 2026  \nMã tra cứu: 0ALLTZYC32A02YC  \nMã của CQT: M1-26-ZLP3J-00000608788  \n\n**Ký hiệu:** 1C26MTT  \n**Số:** 608784  \n\n---\n\n## CÔNG TY CỔ PHẦN SỐI BIỂN TRUNG THỰC  \n\n**Mã số thuế:** 0107522785  \n**Địa chỉ:** Tầng 3, Lô S5-20 Cụm sản xuất làng nghề Triều Khúc, Phường Thanh Liệt, Thành Phố Hà Nội, Việt Nam  \n**Điện thoại:** 1900636326  \n**Website:** https://soibien.vn  \n\n---\n\n### Họ tên người mua hàng:  \n**Tên đơn vị:** Công ty Cổ phần Tập đoàn Cienco4  \n**Địa chỉ:** Tầng 10-11, Tòa nhà ICON4, số 243A đường Đê La Thành, phường Láng Thượng, quận Đống Đa, TP. Hà Nội  \n**Mã số thuế:** 2900324850  \n**Căn cứ các công dân:**  \n**Hình thức thanh toán:** TM/CCK  \n**Mã ĐVQHNS:**  \n**Số điện thoại:**'
 
 
+# ── Case 179: Hóa đơn VN (1).png ──
+def rawtext_179():
+    return '# HÓA ĐƠN GIÁ TRỊ GIA TĂNG VAT INVOICE\n\n**Ngày 15 tháng 06 năm 2025**\n\n---\n\n**Đơn vị bán hàng:** CÔNG TY CỔ PHẦN CÔNG NGHỆ VÀ GIẢI PHÁP FPT\n\n**Mã số thuế:** 0101248141\n\n**Địa chỉ:** Số 10 Phạm Văn Bạch, Phường Cầu Giấy, Hà Nội, Việt Nam\n\n**Điện thoại:** 02435626000\n\n---\n\n**Đơn vị mua hàng:** NGÂN HÀNG TMCP ĐẦU TƯ VÀ PHÁT TRIỂN VIỆT NAM\n\n**Mã số thuế:** 0100150619\n\n**Địa chỉ:** Tháp BIDV, 35 Hàng Vôi, Quận Hoàn Kiếm, Hà Nội, Việt Nam\n\n**Hình thức thanh toán:** Chuyển khoản\n\n| STT | Tên hàng hóa, dịch vụ    | ĐVT  | Số lượng | Đơn giá | Thành tiền |\n|---|---|---|---|---|---|\n| 1   | Phí triển khai phần mềm Core Banking    | Dịch vụ | 1    | 850.000.000 | 850.000.000 |\n| 2   | Phí bảo trì hệ thống Q3/2025    | Dịch vụ | 1    | 120.000.000 | 120.000.000 |\n\n**Cộng tiền hàng:** 970.000.000\n\n**Thuế suất GTGT:** 10% **Tiền thuế GTGT:** 97.000.000\n\n**Tổng cộng tiền thanh toán:** 1.067.000.000\n\n**Số tiền viết bằng chữ:** Một tỷ không trăm sáu mươi bảy triệu đồng\n\n---\n\n**Signature Valid - Ký bởi:** CÔNG TY CỔ PHẦN CÔNG NGHỆ VÀ GIẢI PHÁP FPT\n\n**Signature Valid - Ký bởi:** CÔNG TY CỔ PHẦN CÔNG NGHỆ VÀ GIẢI PHÁP FPT'
+
+def zoomtext_179():
+    return 'HÓA ĐƠN GIÁ TRỊ GIA TĂNG  \nVAT INVOICE  \n\nNgày 15 tháng 06 năm 2025  \n\nKý hiệu: 1C25TAA  \nSố: 00008912  \n\n---\n\n**Đơn vị bán hàng:** CÔNG TY CỔ PHẦN CÔNG NGHỆ VÀ GIẢI PHÁP FPT  \n\n**Mã số thuế:** 0101248141  \n\n**Địa chỉ:** Số 10 Phạm Văn Bạch, Phường Cầu Giấy, Hà Nội, Việt Nam  \n\n**Điện thoại:** 02435626000  \n\n---\n\n**Đơn vị mua hàng:** NGÂN HÀNG TMCP ĐẦU TƯ VÀ PHÁT TRIỂN VIỆT NAM'
+
+
+# ── Case 180: Hóa đơn VN (2).png ──
+def rawtext_180():
+    return '# HÓA ĐƠN GIÁ TRỊ GIA TĂNG  \nNgày 22 tháng 04 năm 2025  \n\nKý hiệu: 1C25TTD  \nSố: 00001578  \n\n---\n\nĐơn vị bán hàng: **CÔNG TY TNHH THƯƠNG MẠI VÀ XÂY DỰNG T&D**  \nMã số thuế: **0801285357**  \nĐịa chỉ: Đội 1, Nghi Khê, Xã Tân Kỳ, TP Hải Phòng, Việt Nam  \nĐiện thoại: 0979372192  \nEmail: dinhchung.ibst@gmail.com  \nSố tài khoản: 19134220914019 tại Techcombank - CN Thống nhất Hải Dương  \n\n---\n\nTên đơn vị mua hàng: **CÔNG TY CỔ PHẦN VẬT LIỆU HOME**  \nMã số thuế: **0108921542**  \nĐịa chỉ: Tầng 7, số 18 Ngụy Như Kon Tum, Phường Thanh Xuân, Hà Nội, Việt Nam  \nHình thức thanh toán: Tiền mặt/Chuyển khoản  \n\n| STT | Tên hàng hóa, dịch vụ    | ĐVT  | Số lượng | Đơn giá | Thành tiền |\n|---|---|---|---|---|---|\n| 1   | Sơn chống thấm Sika Raintite 20kg    | thùng | 45    | 1.250.000 | 56.250.000 |\n| 2   | Keo dán gạch Weber Tai Flexible 25kg    | bao   | 120    | 185.000  | 22.200.000 |\n\n---\n\n**Cộng tiền hàng:**  \n**78.450.000**  \n\n---\n\n| Thuế suất | Tiền hàng | Tiền thuế |\n|---|---|---|\n| 8%    | 78.450.000 | 6.276.000  |\n| Tổng cộng | 78.450.000 | 6.276.000  |\n\n---\n\n**Tổng cộng tiền thanh toán:**  \n**84.726.000**  \n\nSố tiền viết bằng chữ: *Tám mươi bốn triệu bảy trăm hai mươi sáu nghìn đồng*  \n\n---\n\nPhát hành bởi phần mềm MISA meInvoice - Công ty Cổ phần MISA (www.misa.vn)'
+
+def zoomtext_180():
+    return ''
+
+
+# ── Case 181: Hóa đơn VN (3).png ──
+def rawtext_181():
+    return '# HÓA ĐƠN GIÁ TRỊ GIA TĂNG\n\n**Ngày 28 tháng 03 năm 2025**\n\n**Ký hiệu:** 1C25MDT  \n**Số:** 00000089  \n\n---\n\n### Đơn vị bán hàng:\nCÔNG TY TNHH THIẾT BỊ Y TẾ PHƯƠNG ĐÔNG  \n\n**Mã số thuế:** 0314567890  \n\n**Địa chỉ:** 45 Bùi Thị Xuân, Quận 1, TP Hồ Chí Minh, Việt Nam  \n\n**Điện thoại:** 02838123456  \n\n---\n\n### Tên đơn vị mua hàng:\nSỞ Y TẾ THÀNH PHỐ ĐÀ NẴNG  \n\n**Mã số thuế:** 0401234567  \n\n**Địa chỉ:** 103 Quang Trung, Quận Hải Châu, Đà Nẵng, Việt Nam  \n\n**Hình thức thanh toán:** Chuyển khoản  \n\n---\n\n| STT | Tên hàng hóa, dịch vụ    | ĐVT | Số lượng | Đơn giá | Thành tiền | Thuế suất | Tiền thuế | Thành tiền sau thuế |\n|---|---|---|---|---|---|---|---|---|\n| 1   | Máy đo huyết áp điện tử Omron HEM-7156 | cái | 80    | 1.890.000 | 151.200.000 | 5%    | 7.560.000  | 158.760.000    |\n\n---\n\nCộng tiền hàng:  \n151.200.000  \n\nTổng cộng tiền thuế GTGT:  \n7.560.000  \n\nTổng cộng tiền thanh toán:  \n158.760.000  \n\n---\n\n**Số tiền viết bằng chữ:**  \nMột trăm năm mươi tám triệu bảy trăm sáu mươi nghìn đồng  \n\n---\n\n**Mã của cơ quan thuế:**  \nM1-25-8HKPT-00000000089'
+
+def zoomtext_181():
+    return ''
+
+
+# ── Case 182: hóa đơn VN (4).png ──
+def rawtext_182():
+    return '# HÓA ĐƠN GIÁ TRỊ GIA TĂNG\n\n**Ngày 10 tháng 05 năm 2025**\n\n---\n\n**Đơn vị bán hàng:** CÔNG TY CỔ PHẦN DƯỢC PHẨM TRUNG ƯƠNG 1 - PHARBACO  \n**Mã số thuế:** 0100108656  \n**Địa chỉ:** 160 Tôn Thất Tùng, Phường Khương Thượng, Quận Đống Đa, Hà Nội, Việt Nam  \n\n---\n\n**Tên đơn vị mua hàng:** BỆNH VIỆN ĐA KHOA TỈNH HẢI DƯƠNG  \n**Mã số thuế:** 0800100503  \n**Địa chỉ:** 225 Nguyễn Lương Bằng, TP Hải Dương, Hải Dương, Việt Nam  \n**Hình thức thanh toán:** CK  \n\n| STT | Tên hàng hóa, dịch vụ    | ĐVT  | Số lượng | Đơn giá | Thành tiền |\n|---|---|---|---|---|---|\n| 1   | Amoxicillin 500mg (hộp 10 vỉ x 10 viên) | hộp  | 500    | 42.000   | 21.000.000  |\n| 2   | Paracetamol 500mg (hộp 10 vỉ x 10 viên) | hộp  | 1.000    | 18.500   | 18.500.000  |\n| 3   | Vitamin C 500mg (lọ 100 viên)    | lọ   | 200    | 35.000   | 7.000.000   |\n\n**Cộng tiền hàng:** 46.500.000  \n\n---\n\n| Thuế suất | Tiền hàng    | Tiền thuế |\n|---|---|---|\n| 5%    | 46.500.000    | 2.325.000  |\n| Tổng cộng | 46.500.000    | 2.325.000  |\n\n---\n\n**Tổng cộng tiền thanh toán:** 48.825.000  \n\n**Số tiền viết bằng chữ:** Bốn mươi tám triệu tám trăm hai mươi lăm nghìn đồng\n\n--- ZOOM TEXT ---\nHÓA ĐƠN GIÁ TRỊ GIA TĂNG  \nNgày 10 tháng 05 năm 2025  \n\nKý hiệu: 1C25THO  \nSố: 00003241  \n\nĐơn vị bán hàng: CÔNG TY CỔ PHẦN DƯỢC PHẨM TRUNG ƯƠNG 1 - PHARBACO  \nMã số thuế: 0100108656  \nĐịa chỉ: 160 Tôn Thất Tùng, Phường Khương Thượng, Quận Đống Đa, Hà Nội, Việt Nam  \n\nTên đơn vị mua hàng: BỆNH VIỆN ĐA KHOA TỈNH HẢI DƯƠNG'
+
+def zoomtext_182():
+    return 'HÓA ĐƠN GIÁ TRỊ GIA TĂNG  \nNgày 10 tháng 05 năm 2025  \n\nKý hiệu: 1C25THO  \nSố: 00003241  \n\nĐơn vị bán hàng: CÔNG TY CỔ PHẦN DƯỢC PHẨM TRUNG ƯƠNG 1 - PHARBACO  \nMã số thuế: 0100108656  \nĐịa chỉ: 160 Tôn Thất Tùng, Phường Khương Thượng, Quận Đống Đa, Hà Nội, Việt Nam  \n\nTên đơn vị mua hàng: BỆNH VIỆN ĐA KHOA TỈNH HẢI DƯƠNG'
+
+
+# ── Case 183: Hóa đơn Việt Nam 5.png ──
+def rawtext_183():
+    return '# HÓA ĐƠN GIÁ TRỊ GIA TĂNG\n\nNgày 05 tháng 02 năm 2025\n\nKý hiệu: 1C24TMB  \nSố: 00018923  \n\n---\n\nĐơn vị bán hàng: **CHI NHÁNH CÔNG TY CỔ PHẦN MẮT BÃO**  \nMã số thuế: **0302712571-001**  \nĐịa chỉ: Tầng 8, Số 381 Đội Cấn, Phường Liễu Giai, Quận Ba Đình, Hà Nội, Việt Nam  \nĐiện thoại: 024.35123456  \nSố tài khoản: 500038888 tại VP Bank - CN Láng Hạ  \n\n---\n\nNgười mua hàng: **Nguyễn Văn Minh**  \nĐịa chỉ: Số 15 ngõ 82 Phố Chùa Láng, Phường Láng Thượng, Quận Đống Đa, Hà Nội, Việt Nam  \nHình thức thanh toán: TM/CK  \n\n| STT | Tên hàng hóa, dịch vụ    | ĐVT  | Số lượng | Đơn giá | Thành tiền |\n|---|---|---|---|---|---|\n| 1   | Phí duy trì tên miền .vn (minhtech.vn) | Năm | 3    | 350.000  | 1.050.000  |\n| 2   | Phí hosting Linux SSD 5GB    | Năm | 2    | 890.000  | 1.780.000  |\n| 3   | Phí SSL Certificate DV    | Năm | 1    | 450.000  | 450.000    |\n\n---\n\nCộng tiền hàng: **3.280.000**  \nThuế suất GTGT: **10%**  \nTiền thuế GTGT: **328.000**  \n\n---\n\n**Tổng cộng tiền thanh toán:** **3.608.000**  \n\nSố tiền viết bằng chữ: *Ba triệu sáu trăm lẻ tám nghìn đồng*'
+
+def zoomtext_183():
+    return ''
+
+# ── Case 184: VND.pdf ──
+def rawtext_184():
+    return 'HÓA ĐƠN GIÁ TRỊ GIA TĂNG  \nVAT INVOICE  \n\nNgày (Day) 11 tháng (month) 06 năm (year) 2026  \nKý hiệu (Serial No.): 1C26TKM  \nMCQT cấp (Verification Code): 0069BE04C12CC349FAB0F3530CA16D8879  \nSố (Invoice No.): 200  \nHóa đơn chuyển đổi từ hóa đơn điện tử  \nInvoice converted from E-invoice  \n\nĐơn vị bán hàng (Seller): CÔNG TY TNHH THƯƠNG MẠI KOIZUMI VIỆT NAM  \nMã số thuế (Tax Code): 0314006330  \nĐịa chỉ (Address): Phòng 602, Tầng 6, Cao ốc Zen Plaza, 54-56 Nguyễn Trãi, Phường Bến Thành, Thành phố Hồ Chí Minh, Việt Nam  \nSố tài khoản (Account No.): H15-796-518767, MIZUHO BANK CO.,LTD - HCM CITY BRANCH  \nĐiện thoại (Phone): (028) 3824 6008  \n\nHọ tên người mua hàng (Buyer):  \nTên đơn vị (Company): CÔNG TY CỔ PHẦN THƯƠNG MẠI VÀ DỊCH VỤ THÉP NAM PHÁT  \nMã số thuế (Tax Code): 0900692339  \nĐịa chỉ (Address): Tổ dân phố Thịnh Vạn, Phường Thượng Hồng, Tỉnh Hưng Yên, Việt Nam  \nSố tài khoản (Account No.): Hình thức thanh toán (Method of Payment): Thanh toán LC  \n\n| Stt No. | Tên hàng hóa, dịch vụ | Đvt UOM | Số lượng Quantity | Đơn giá Price | Thành tiền Amount |\n|---|---|---|---|---|---|\n| 1    | 2    | 3    | 4    | 5    | 6=4x5    |\n| 1    | Thép cuộn cán nóng không gỉ, SUS 304 (2,5-3)mm x 1250mm x C | kg | 761.425,000 | 64.355,00 | 49.001.505.875 |\n|    | Hợp đồng số: 05.06.2026/KVT-NPS/1048 ngày 05/06/2026 |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |  \n<truncated 1880 bytes>\n   |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |    |    |    |    |\n|    |    |'
+
+def zoomtext_184():
+    return ''
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # REGISTRY
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1675,6 +1722,12 @@ CASES = [
     (176, 'HDDT_169557620260320101935317.pdf', rawtext_176, zoomtext_176),
     (177, 'VietnamInvoice1.pdf', rawtext_177, zoomtext_177),
     (178, 'C26MTT608784.pdf', rawtext_178, zoomtext_178),
+    (179, 'Hóa đơn VN (1).png', rawtext_179, zoomtext_179),
+    (180, 'Hóa đơn VN (2).png', rawtext_180, zoomtext_180),
+    (181, 'Hóa đơn VN (3).png', rawtext_181, zoomtext_181),
+    (182, 'hóa đơn VN (4).png', rawtext_182, zoomtext_182),
+    (183, 'Hóa đơn Việt Nam 5.png', rawtext_183, zoomtext_183),
+    (184, 'VND.pdf', rawtext_184, zoomtext_184),
 ]
 
 
