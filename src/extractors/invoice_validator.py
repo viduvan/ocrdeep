@@ -65,6 +65,37 @@ class InvoiceValidator:
             ):
                 expected = round(qty * price, 2)
                 if abs(expected - amount) > 0.5:
+                    # Let's try auto-correcting scale errors (off by 1000x or 1/1000x)
+                    
+                    # Case A: price was too small by 1000x (e.g. 42.000 parsed as 42.0 instead of 42000.0)
+                    corrected_p_large = qty * (price * 1000)
+                    if abs(corrected_p_large - amount) < amount * 0.02:
+                        item["unitPrice"] = price * 1000
+                        logger.info(f"[Validator] Fixed item {i} unitPrice: {price} -> {price * 1000}")
+                        continue
+                        
+                    # Case B: qty was too large by 1000x (e.g. 761.425,000 parsed as 761425000.0 instead of 761425.0)
+                    corrected_q_small = (qty / 1000) * price
+                    if abs(corrected_q_small - amount) < amount * 0.02:
+                        item["quantity"] = qty / 1000
+                        logger.info(f"[Validator] Fixed item {i} quantity: {qty} -> {qty / 1000}")
+                        continue
+                        
+                    # Case C: price was too large by 1000x (e.g. 64.355,000 parsed as 64355000.0 instead of 64355.0)
+                    corrected_p_small = qty * (price / 1000)
+                    if abs(corrected_p_small - amount) < amount * 0.02:
+                        item["unitPrice"] = price / 1000
+                        logger.info(f"[Validator] Fixed item {i} unitPrice: {price} -> {price / 1000}")
+                        continue
+                        
+                    # Case D: qty was too small by 1000x
+                    corrected_q_large = (qty * 1000) * price
+                    if abs(corrected_q_large - amount) < amount * 0.02:
+                        item["quantity"] = qty * 1000
+                        logger.info(f"[Validator] Fixed item {i} quantity: {qty} -> {qty * 1000}")
+                        continue
+
+                    # If still mismatched after trying to fix
                     flags[f"item_{i}_math"] = (
                         f"MISMATCH: {qty}×{price}={expected} ≠ {amount}"
                     )
