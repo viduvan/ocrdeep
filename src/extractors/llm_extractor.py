@@ -50,9 +50,11 @@ CRITICAL RULES:
      Group all consumption tiers into ONE item with productName="Điện tiêu thụ", quantity=total kWh, amount=total pre-tax amount.
 8. For totalAmount: Look for "Tổng cộng tiền thanh toán", "Total payment", "Total Amount", "Grand Total", "Tổng cộng", "TOTAL VALUE", "Amount Due"
    - For Vietnamese GTGT invoices: use "Tổng cộng tiền thanh toán" or the "Cộng tiền thanh toán" row in the tax summary table.
+   - CRITICAL: In commercial invoices under Letter of Credit (L/C) context, if there is a "TOTAL AMOUNT CLAIM UNDER THIS LC", "REMAINING AMOUNT PAYABLE UNDER L/C", "AMOUNT PAYABLE UNDER L/C", "NET AMOUNT UNDER L/C" (or similar L/C claim/payable amount), ALWAYS use this L/C amount as the authoritative totalAmount instead of the general invoice total or total value of goods shipped.
 9. For preTaxPrice (IMPORTANT - do NOT skip this field):
    - Look for "Cộng tiền hàng", "Tổng tiền hàng", "Thành tiền trước thuế GTGT", "Total amount", "Subtotal", "Sub Total", "Total Commercial Value", "EXW", "FOB", "CIF"
    - If there is NO separate subtotal line but there IS a total: set preTaxPrice = totalAmount (the pre-tax price equals the total when tax is 0 or not applicable)
+   - If totalAmount is determined by L/C claim amount, set preTaxPrice to match it.
    - If you can compute it: preTaxPrice = totalAmount - taxAmount
 10. For currency: Look for "$", "USD", "EUR", "GBP", "VND", "₫", "£", "€", "Đồng tiền thanh toán" or explicit "Currency:" labels
 11. For tax: Look for "VAT", "Tax", "GST", "CGST", "SGST", "Thuế GTGT", "Thuế suất GTGT"
