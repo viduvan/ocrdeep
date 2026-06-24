@@ -13,7 +13,18 @@ import json
 import time
 import argparse
 
+# Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+# Load .env if exists
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+if os.path.exists(env_path):
+    with open(env_path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, val = line.split('=', 1)
+                os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
 
 from src.extractors.llm_extractor import extract_invoice_llm
 from src.extractors.invoice_validator import InvoiceValidator
