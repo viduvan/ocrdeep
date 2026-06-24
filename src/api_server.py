@@ -177,6 +177,11 @@ app = FastAPI(
 )
 
 
+@app.get("/health", summary="Health check endpoint")
+async def health_check():
+    return {"status": "healthy"}
+
+
 
 # OCR CORE (VISION OCR)
 
