@@ -13,6 +13,15 @@ def parse_vn_date(text: str) -> date | None:
     
     text = text.strip()
 
+    # Pattern 0: ISO format YYYY-MM-DD (returned by LLM extractor)
+    m = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})$", text)
+    if m:
+        y, mth, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        try:
+            return date(y, mth, d)
+        except ValueError:
+            pass
+
     # Pattern 1: Slash/Dot/Hyphen separated (dd/mm/yyyy)
     m = re.search(r"(\d{1,2})[/\.\-](\d{1,2})[/\.\-](\d{4})", text)
     if m:

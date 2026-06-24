@@ -21,6 +21,7 @@ class TableGuard:
         self.max_line_repetition = max_line_repetition
         self.signature_char_limit = signature_char_limit
         self.similarity_threshold = similarity_threshold
+        self.line_buffer = ""
         self.reset()
 
     def reset(self):
@@ -38,6 +39,7 @@ class TableGuard:
         self.recent_lines = []  # Store last N lines for pattern detection
         # Loop pattern counter (separate from line repeat)
         self.loop_pattern_count = 0
+        self.line_buffer = ""
 
     def _is_empty_row(self, text: str) -> bool:
         # All <td> are empty or whitespace
@@ -105,75 +107,97 @@ class TableGuard:
         return common / total if total > 0 else 0.0
 
     def process(self, text: str):
+        self.line_buffer += text
         force_close = False
         
+        # If there's a newline, we process the completed lines
+        if "\n" in self.line_buffer:
+            lines = self.line_buffer.split("\n")
+            self.line_buffer = lines[-1]  # Keep incomplete line
+            completed_lines = lines[:-1]
+            
+            for line in completed_lines:
+                force_close = self._process_line(line)
+                if force_close:
+                    break
+                    
+        if force_close:
+            self.reset()
+            return "", True
+            
+        return text, False
+
+    def _process_line(self, line: str) -> bool:
         # === LOOP PATTERN DETECTION ===
-        # Check for known loop patterns immediately
-        # Use dedicated counter that doesn't get reset by normal lines
-        if self._is_loop_pattern(text):
+        if self._is_loop_pattern(line):
             self.loop_pattern_count += 1
-            # Stop after just 2 matches of footer patterns (they shouldn't repeat at all)
             if self.loop_pattern_count >= 2:
-                return "", True
+                return True
         
         # === SIGNATURE SECTION LIMIT ===
-        # If already in signature section, count chars
         if self.in_signature:
-            self.chars_after_signature += len(text)
+            self.chars_after_signature += len(line)
             if self.chars_after_signature >= self.signature_char_limit:
-                return text, True  # Stop after signature limit
+                return True
         
-        # Check if entering signature section
-        if self._is_signature_keyword(text):
+        if self._is_signature_keyword(line):
             self.in_signature = True
         
-        # === LINE REPETITION DETECTION (Exact + Fuzzy) ===
-        # Normalize text for comparison (strip whitespace and markdown)
-        normalized = text.strip().replace("*", "").replace("_", "")
-        if normalized and len(normalized) > 5:  # Ignore very short lines
-            # Exact match
+        # === LINE REPETITION DETECTION ===
+        normalized = line.strip().replace("*", "").replace("_", "")
+        if normalized and len(normalized) > 5:
             if normalized == self.last_line:
                 self.line_repeat_count += 1
                 if self.line_repeat_count >= self.max_line_repetition:
-                    return "", True  # Stop and don't include this repeated line
-            # Fuzzy match (for OCR noise)
+                    return True
             elif self._calculate_similarity(normalized, self.last_line) > self.similarity_threshold:
                 self.line_repeat_count += 1
                 if self.line_repeat_count >= self.max_line_repetition:
-                    return "", True
+                    return True
             else:
                 self.last_line = normalized
                 self.line_repeat_count = 0
-
-        # === TABLE-SPECIFIC CHECKS (existing logic) ===
-        if "<table" in text:
+                
+        # === TABLE-SPECIFIC CHECKS ===
+        line_strip = line.strip()
+        
+        # HTML Table detection
+        if "<table" in line_strip:
             self.in_table = True
-
-        if self.in_table:
-            if "<tr" in text:
+            
+        if self.in_table and "<tr" in line_strip:
+            self.row_count += 1
+            if self._is_empty_row(line_strip):
+                self.empty_row_streak += 1
+            else:
+                self.empty_row_streak = 0
+                
+            stt = self._extract_stt(line_strip)
+            if stt is not None:
+                if self.last_stt is not None and stt <= self.last_stt:
+                    return True
+                self.last_stt = stt
+                
+        # Markdown Table detection
+        pipe_count = line_strip.count("|")
+        if pipe_count >= 3:
+            # Exclude separator lines like |---|---|
+            if not set(line_strip).issubset({"|", "-", " ", ":", "+"}):
                 self.row_count += 1
-
-                # Rule 1: Empty rows
-                if self._is_empty_row(text):
+                
+                # Check if empty row
+                cells = line_strip.split("|")[1:-1]
+                is_empty = all(not any(c.isalpha() for c in cell) for cell in cells)
+                if is_empty:
                     self.empty_row_streak += 1
                 else:
                     self.empty_row_streak = 0
-
-                # Rule 2: STT not increasing
-                stt = self._extract_stt(text)
-                if stt is not None:
-                    if self.last_stt is not None and stt <= self.last_stt:
-                        force_close = True
-                    self.last_stt = stt
-
-            # HARD STOP CONDITIONS for table
-            if (
-                self.row_count >= self.max_rows
-                or self.empty_row_streak >= self.max_consecutive_empty_rows
-            ):
-                force_close = True
-
-        if force_close:
-            self.reset()
-
-        return text, force_close
+                    
+        # Hard stop conditions
+        if (
+            self.row_count >= self.max_rows
+            or self.empty_row_streak >= self.max_consecutive_empty_rows
+        ):
+            return True
+            
+        return False
