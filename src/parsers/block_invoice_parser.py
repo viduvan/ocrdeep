@@ -5198,10 +5198,11 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
         for item in invoice.itemList:
             # Check if all numeric fields are null
             has_no_data = (item.quantity is None and item.unitPrice is None and item.amount is None)
+            _has_full_data = (item.quantity is not None and item.unitPrice is not None and item.amount is not None)
             
             # Check for garbage keywords
             name_lower = (item.productName or "").lower()
-            has_garbage_keyword = any(kw in name_lower for kw in GARBAGE_KEYWORDS)
+            has_garbage_keyword = any(kw in name_lower for kw in GARBAGE_KEYWORDS) and not _has_full_data
             
             # Check if productName is just a currency code (e.g. "USD" from pipe table)
             is_currency = name_lower.strip() in CURRENCY_CODES
@@ -5221,7 +5222,6 @@ def parse_invoice_block_based(raw_text: str) -> Invoice:
             # Filter purely numeric short names (metadata from footer tables)
             # BUT keep items that have all numeric data (qty, price, amount) — these are valid items
             # where productName is just the row number (e.g. Item# column: "1", "2", "16")
-            _has_full_data = (item.quantity is not None and item.unitPrice is not None and item.amount is not None)
             is_numeric_name = (name_stripped.replace('.', '').replace(',', '').isdigit()
                               and len(name_stripped) <= 5
                               and not _has_full_data)

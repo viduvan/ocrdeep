@@ -725,12 +725,31 @@ def parse_markdown_table(lines: List[str]) -> List[InvoiceItem]:
                 it.unitPrice is not None and it.unitPrice > 0 and
                 it.amount is not None and it.amount > 0):
             expected = it.quantity * it.unitPrice
-            # Check if current parsing is wrong (off by ~1000x)
+            # Check if current parsing is wrong (off by ~1000x or 1/1000x)
             if abs(expected - it.amount) > it.amount * 0.05:  # More than 5% off
-                # Try multiplying unitPrice by 1000 (dot was thousand sep)
+                # Case A: unitPrice was off by 1/1000 (e.g. 42.000 parsed as 42.0 instead of 42000.0)
                 corrected = it.quantity * (it.unitPrice * 1000)
                 if abs(corrected - it.amount) < it.amount * 0.02:  # Within 2%
                     it.unitPrice = it.unitPrice * 1000
+                    continue
+                
+                # Case B: quantity was off by 1000 (e.g. 761.425,000 parsed as 761425000.0 instead of 761425.0)
+                corrected_qty = (it.quantity / 1000) * it.unitPrice
+                if abs(corrected_qty - it.amount) < it.amount * 0.02:
+                    it.quantity = it.quantity / 1000
+                    continue
+
+                # Case C: unitPrice was off by 1000 (e.g. 64.355,000 parsed as 64355000.0 instead of 64355.0)
+                corrected_price = it.quantity * (it.unitPrice / 1000)
+                if abs(corrected_price - it.amount) < it.amount * 0.02:
+                    it.unitPrice = it.unitPrice / 1000
+                    continue
+
+                # Case D: quantity was off by 1/1000 (too small)
+                corrected_qty_large = (it.quantity * 1000) * it.unitPrice
+                if abs(corrected_qty_large - it.amount) < it.amount * 0.02:
+                    it.quantity = it.quantity * 1000
+                    continue
 
     return deduped
 def parse_structured_items(raw_text: str) -> List[InvoiceItem]:
