@@ -1,0 +1,10 @@
+import asyncio
+import json
+from dotenv import load_dotenv
+load_dotenv()
+from src.extractors.llm_extractor import extract_invoice_llm
+
+raw_text = """### COMMERCIAL INVOICE\n\n#### Shipper\n**HS Hyosung Quang Nam Co., Ltd**  \nLot D6, Tam Thang Industrial Zone, Thang Truong Commune, Da Nang City, Vietnam.\n\n#### For Account & Risk of Messrs.\n**KUMHO TIRE CO., INC.**  \nHEUNGKUK LIFE BUILDING, 68  \nSAEMUNAN-RO, JONGNO-GU SEOUL 03184, KOREA  \nGWANSIK KIM (+82 2 6303 8241)  \nEmail: gwansik_kim@kumhotire.com\n\n#### Notify Party\n**KUMHO TIRE CO., INC.**  \nHEUNGKUK LIFE BUILDING, 68  \nSAEMUNAN-RO, JONGNO-GU SEOUL 03184, KOREA  \nGWANSIK KIM (+82 2 6303 8241)  \nEmail: gwansik_kim@kumhotire.com\n\n#### Port of Loading\n**HO CHI MINH PORT, VIETNAM**\n\n#### Carrier\n**SAWASDEE RIGEL / 2605N**\n\n#### Marks & Numbers of PKGS\n**N/M**  \n////////////  \n**ORIGIN VIETNAM**\n\n#### No & Date\n**TCQKHKR-2605-01**\n\n#### No & Date of LC\n**5-Jun-26**\n\n#### LC Issuing Bank\n**//LC**\n\n#### Remarks:\n**T/T 30 DAYS AFTER BL DATE**  \n**PO: 710061980**\n\n#### Final destination\n**KWANGYANG, KOREA**\n\n#### Sailing on about\n**7-Jun-26**\n\n#### Quantity/Unit\n**//**\n\n#### Unit-Price\n**16. AMOUNT**\n\n#### CIF KWANGYANG, SOUTH KOREA\n**////////////**\n\n#### POLYESTER TIRE CORD DIP FABRIC\n**T/C, 1000/2,35.0*56.0*2320M, K-H-KOR**  \n**22,310 KGS**  \n**USD2.750/KG**  \n**USD61,352.5C**\n\n#### Total\n**22,310 KGS**  \n**USD61,352.5C**\n\n#### Remarks:\n**Yours faithfully**\n\n#### Beneficiary Name\n**HS HYOSUNG QUANG NAM COMPANY LIMITED**\n\n#### Beneficiary address\n**Lot D6, Tam Thang Industrial zone, Thang Truong commune, Danang City, Vietnam**\n\n#### Beneficiary's bank\n**Vietnam Joint Stock Commercial Bank for Industry and Trade, Nhon Trach Branch**\n\n#### Bank address\n**25B Street, Nhon Trach Commune, Dong Nai Province, Vietnam**\n\n#### Swift code\n**ICBVNVX**\n\n#### Account No.\n**111002670768**\n\n#### Currency\n**USD**\n\n#### YOO KWON YUN"""
+
+result = extract_invoice_llm(raw_text, "")
+print(json.dumps(result, indent=4, ensure_ascii=False))
