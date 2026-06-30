@@ -31,11 +31,18 @@ CRITICAL RULES:
 2. For invoice ID: Look for patterns like "No.", "No:", "Số:", "Invoice No", "Invoice Number", "Number:", "#", "INV.", "Invoice #"
    - Clean the ID value: remove trailing punctuation marks like "!", ".", "," that may be OCR artifacts. E.g., "047!" → "047"
 3. For invoice name/title: Look for document title like "COMMERCIAL INVOICE", "INVOICE", "Proforma Invoice", "HÓA ĐƠN GIÁ TRỊ GIA TĂNG"
+   - CRITICAL: If the document title is NOT explicitly stated in the text, DO NOT return null. Instead, infer it:
+     * For Vietnamese invoices (e.g. contains Vietnamese text, VND currency): return "Hóa Đơn Giá Trị Gia Tăng"
+     * For foreign/international invoices: return "COMMERCIAL INVOICE"
 4. For dates: Convert to YYYY-MM-DD format (ISO 8601). 
    - Date format depends on document type:
      a) Vietnamese invoices (GTGT, "Hóa đơn"): DD/MM/YYYY. "09/05/2025" → "2025-05-09" (May 9th)
      b) English/Commercial invoices ("COMMERCIAL INVOICE", "INVOICE", "Proforma"): MM/DD/YYYY. "09/05/2025" → "2025-09-05" (Sep 5th)
    - Named months are unambiguous: "Feb 14, 2019" → "2019-02-14", "28-Oct-25" → "2025-10-28", "20-Nov-2017" → "2017-11-20"
+   - CRITICAL FALLBACK FOR INVOICE DATE: If the exact invoice date is missing next to the Invoice Number, you MUST fallback to extracting it from other logical dates on the document, in this order:
+     1. "Sailing on about" date or "B/L Date".
+     2. "No & Date of L/C" or "Date of L/C" or "L/C Date".
+     If you find "Sailing on about 7-Jun-26" or "No & Date of LC 5-Jun-26", extract that date as the `invoiceDate` rather than returning null.
 5. For seller/exporter: Look for "Shipper", "Exporter", "Seller", "FROM", "Đơn vị bán hàng", "Người bán hàng", "Ship From", "THE SELLER", "Beneficiary"
 6. For buyer/importer: Look for "Consignee", "Importer", "Buyer", "TO", "Người mua hàng", "Tên đơn vị", "Khách hàng", "Bill To", "THE BUYER", "Applicant", "Ship To"
    - For sellerName/buyerName: Extract ONLY the company name. Remove label prefixes like "Đơn vị bán hàng:", "Đơn vị mua hàng:", "Ký bởi:", etc.
