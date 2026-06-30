@@ -64,10 +64,14 @@ class OCRWorker(QThread):
         self.in_table = False
         self.table_row_count = 0
         self.empty_row_streak = 0
+        self.duplicate_row_streak = 0
+        self.recent_lines = []
+        self.line_buffer = ""
 
         # Safe thresholds for invoices
-        self.MAX_TABLE_ROWS = 10
-        self.MAX_EMPTY_ROWS = 2
+        self.MAX_TABLE_ROWS = 150
+        self.MAX_EMPTY_ROWS = 4
+        self.MAX_DUPLICATE_ROWS = 4
 
 
 
@@ -94,7 +98,12 @@ class OCRWorker(QThread):
                 # Process each chunk from the streaming AI response
                 self._reset_table_state()
                 self.buffer = ""
-                for chunk in stream_ocr_response(self.client, self.model_name, self.prompt, img_bytes, config.INFERENCE_PARAMS):
+                for chunk in stream_ocr_response(
+                    model_name=self.model_name,
+                    prompt=self.prompt,
+                    image_bytes=img_bytes,
+                    options=config.INFERENCE_PARAMS,
+                ):
                     if not self.is_running: break 
                     self.process_chunk(chunk)
 
@@ -124,28 +133,84 @@ class OCRWorker(QThread):
     # TABLE LOOP DETECTION
     def _detect_table_loop(self, text: str) -> bool:
         """
-        Detect infinite table generation.
+        Detect infinite table generation in both HTML and Markdown format.
         """
-        if "<table" in text:
-            self.in_table = True
-
-        if not self.in_table:
+        self.line_buffer += text
+        if "\n" not in self.line_buffer:
             return False
-
-        if "<tr" in text:
-            self.table_row_count += 1
-
-            if re.search(r"<td>\s*</td>", text):
-                self.empty_row_streak += 1
-            else:
-                self.empty_row_streak = 0
-
-        if (
-            self.table_row_count >= self.MAX_TABLE_ROWS
-            or self.empty_row_streak >= self.MAX_EMPTY_ROWS
-        ):
-            return True
-
+            
+        lines = self.line_buffer.split("\n")
+        # The last element is the current incomplete line
+        self.line_buffer = lines[-1]
+        completed_lines = lines[:-1]
+        
+        for line in completed_lines:
+            line_strip = line.strip()
+            if not line_strip:
+                continue
+                
+            is_table_row = False
+            is_empty_row = False
+            
+            # HTML table detection
+            if "<table" in line_strip:
+                self.in_table = True
+            if self.in_table and "<tr" in line_strip:
+                is_table_row = True
+                # Check if it contains only empty cells
+                td_contents = re.findall(r"<td>(.*?)</td>", line_strip, re.IGNORECASE)
+                if td_contents:
+                    # If all cells have no letters
+                    if all(not any(c.isalpha() for c in td) for td in td_contents):
+                        is_empty_row = True
+                else:
+                    if re.search(r"<td>\s*</td>", line_strip):
+                        is_empty_row = True
+            
+            # Markdown table detection
+            pipe_count = line_strip.count("|")
+            if pipe_count >= 3:
+                # Exclude separator lines like |---|---|
+                if not set(line_strip).issubset({"|", "-", " ", ":", "+"}):
+                    is_table_row = True
+                    # Split by pipe and check if all cells have no letters
+                    cells = line_strip.split("|")[1:-1]
+                    if all(not any(c.isalpha() for c in cell) for cell in cells):
+                        is_empty_row = True
+                    
+            # Global duplicate pattern loop detection (works for multi-line loops)
+            current_text = "".join(c for c in line_strip if c.isalnum())
+            if current_text and len(current_text) > 5:
+                self.recent_lines.append(current_text)
+                if len(self.recent_lines) > 20:
+                    self.recent_lines.pop(0)
+                
+                # Check for 1-line loop (A A A A)
+                if len(self.recent_lines) >= 4 and len(set(self.recent_lines[-4:])) == 1:
+                    return True
+                # Check for 2-line loop (A B A B A B)
+                if len(self.recent_lines) >= 6 and self.recent_lines[-2:] == self.recent_lines[-4:-2] == self.recent_lines[-6:-4]:
+                    return True
+                # Check for 3-line loop (A B C A B C A B C)
+                if len(self.recent_lines) >= 9 and self.recent_lines[-3:] == self.recent_lines[-6:-3] == self.recent_lines[-9:-6]:
+                    return True
+                # Check for 4-line loop (A B C D A B C D A B C D)
+                if len(self.recent_lines) >= 12 and self.recent_lines[-4:] == self.recent_lines[-8:-4] == self.recent_lines[-12:-8]:
+                    return True
+                
+            if is_table_row:
+                self.table_row_count += 1
+                if is_empty_row:
+                    self.empty_row_streak += 1
+                else:
+                    self.empty_row_streak = 0
+                    
+                if (
+                    self.table_row_count >= self.MAX_TABLE_ROWS
+                    or self.empty_row_streak >= self.MAX_EMPTY_ROWS
+                ):
+                    return True
+                    
         return False
 
     def _force_terminate_table(self):
@@ -171,6 +236,7 @@ class OCRWorker(QThread):
         self.in_table = False
         self.table_row_count = 0
         self.empty_row_streak = 0
+        self.line_buffer = ""
 
 
     def process_chunk(self, chunk):
