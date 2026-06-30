@@ -144,8 +144,9 @@ class TableGuard:
             self.in_signature = True
         
         # === LINE REPETITION DETECTION ===
-        normalized = line.strip().replace("*", "").replace("_", "")
+        normalized = "".join(c for c in line.strip() if c.isalnum())
         if normalized and len(normalized) > 5:
+            # 1. Single line repetition check (with fuzzy similarity fallback)
             if normalized == self.last_line:
                 self.line_repeat_count += 1
                 if self.line_repeat_count >= self.max_line_repetition:
@@ -157,6 +158,18 @@ class TableGuard:
             else:
                 self.last_line = normalized
                 self.line_repeat_count = 0
+            
+            # 2. Multi-line pattern loop check (e.g. A B A B A B)
+            self.recent_lines.append(normalized)
+            if len(self.recent_lines) > 20:
+                self.recent_lines.pop(0)
+                
+            if len(self.recent_lines) >= 6 and self.recent_lines[-2:] == self.recent_lines[-4:-2] == self.recent_lines[-6:-4]:
+                return True
+            if len(self.recent_lines) >= 9 and self.recent_lines[-3:] == self.recent_lines[-6:-3] == self.recent_lines[-9:-6]:
+                return True
+            if len(self.recent_lines) >= 12 and self.recent_lines[-4:] == self.recent_lines[-8:-4] == self.recent_lines[-12:-8]:
+                return True
                 
         # === TABLE-SPECIFIC CHECKS ===
         line_strip = line.strip()
