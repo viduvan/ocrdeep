@@ -213,6 +213,7 @@ def get_header_right_crop_bytes(filepath: str, page_index: int = 0,
             clip = fitz.Rect(x_start, rect.y0, rect.x1, rect.y0 + clip_height)
 
             # Right-crop zoom: same high DPI as other crop functions (216 DPI = 3x)
+            # target_dpi = 216
             target_dpi = 72
             zoom = target_dpi / 72.0
             matrix = fitz.Matrix(zoom, zoom)
@@ -301,6 +302,7 @@ def get_bol_crop_bytes_page(filepath: str, page_index: int, ratio: float = 0.45)
         clip = fitz.Rect(rect.x0, rect.y0, rect.x1, rect.y0 + clip_height)
         
         # Zoom-in pass: B/L header crop also benefits from higher DPI (216 = 3x).
+        # target_dpi = 216
         target_dpi = 72
         zoom = target_dpi / 72.0
         
