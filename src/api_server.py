@@ -457,6 +457,7 @@ async def detect_single_invoice_ocr(
             "extraction_method": extraction_meta["extraction_method"],
             "validation": extraction_meta.get("validation", {}),
             "raw_text": raw_text,
+            "zoom_text": zoom_text,
             "data": invoice,
         }
         if ocr_result.get("timed_out"):
@@ -628,6 +629,7 @@ async def detect_invoice_ocr(
                 "extraction_method": extraction_meta["extraction_method"],
                 "validation": extraction_meta.get("validation", {}),
                 "raw_text": raw_text,
+                "zoom_text": zoom_text,
                 "data": invoice,
             }
             if ocr_result.get("timed_out"):
