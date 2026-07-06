@@ -1058,6 +1058,130 @@ async def detect_bill_of_lading_ocr(
 
 
 
+# ============================================
+# DKKD OCR ENDPOINT (Giấy Đăng Ký Kinh Doanh)
+# ============================================
+
+@app.post(
+    "/ocr-dkkd",
+    summary="OCR Giấy đăng ký kinh doanh (Business Registration Certificate)",
+)
+async def detect_dkkd_ocr(
+    file: UploadFile = File(...),
+    model_name: str = Form(config.VLLM_MODEL),
+    per_file_timeout: int = Form(config.OCR_TIMEOUT_SECONDS),
+):
+    """
+    OCR a Vietnamese Business Registration Certificate (Giấy ĐKKD).
+
+    - Always OCRs ALL pages (typically 2 pages):
+        * Page 1: enterprise info + legal representatives
+        * Page 2: capital contributors table (Danh sách thành viên góp vốn)
+    - LLM extraction first (FPT Cloud Qwen3-32B), regex fallback if LLM fails
+    - Returns JSON compatible with BE Spring Boot OcrCorporateBussinessResponse:
+      { "status": 200, "data": { ...BusinessRegistration fields... } }
+
+    Accepted file types: PDF, DOC, DOCX
+    """
+    from src.extractors.dkkd_extractor import extract_dkkd_llm
+    from src.parsers.dkkd_parser import parse_dkkd
+    from src.schemas.business_registration import BusinessRegistration
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file uploaded")
+
+    if not file.filename.lower().endswith((".pdf", ".doc", ".docx")):
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file type. Use PDF, DOC, or DOCX."
+        )
+
+    session_id = str(uuid.uuid4())
+    temp_dir = Path("temp_ocr") / session_id
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    temp_file = temp_dir / file.filename
+    with open(temp_file, "wb") as f:
+        f.write(await file.read())
+
+    file_start_time = time.time()
+
+    try:
+        # ---- OCR ALL PAGES (no page selection) ----
+        ocr_result = run_vision_ocr(
+            str(temp_file),
+            model_name=model_name,
+            ocr_mode="plain",   # plain OCR — LLM handles structured extraction
+            pages=None,         # always process all pages
+            timeout_seconds=per_file_timeout,
+        )
+
+        raw_text = ocr_result["raw_text"]
+        page_count = ocr_result.get("page_count", 1)
+        duration = ocr_result["duration_sec"]
+        timed_out = ocr_result.get("timed_out", False)
+
+        logger.info(
+            f"[DKKD] OCR done — file={file.filename}, pages={page_count}, "
+            f"duration={duration}s, chars={len(raw_text)}"
+        )
+
+        # ---- LLM extraction (primary) ----
+        extraction_method = "llm"
+        llm_result = extract_dkkd_llm(raw_text, model=model_name if model_name != config.VLLM_MODEL else None)
+
+        if llm_result is not None:
+            try:
+                biz = BusinessRegistration(**llm_result)
+            except Exception as e:
+                logger.warning(f"[DKKD] Pydantic validation failed for LLM result, falling back: {e}")
+                llm_result = None
+
+        # ---- Regex fallback ----
+        if llm_result is None:
+            extraction_method = "regex_fallback"
+            logger.info(f"[DKKD] LLM failed — using regex fallback for {file.filename}")
+            biz = parse_dkkd(raw_text)
+
+        # ---- Build response ----
+        # Response format: { status, data } — compatible with BE Spring Boot OcrServiceImpl parser
+        result_data = {
+            "status": 200,
+            "data": biz.model_dump(),
+            # raw_text: full OCR output (all pages) — for debugging & local parser/LLM testing
+            "raw_text": raw_text,
+            # Debug metadata (stripped by BE, kept for ocr-deep debugging)
+            "_meta": {
+                "filename": file.filename,
+                "page_count": page_count,
+                "duration_sec": duration,
+                "extraction_method": extraction_method,
+            }
+        }
+
+        if timed_out:
+            result_data["_meta"]["warning"] = (
+                f"OCR timeout — partial results (limit: {per_file_timeout}s)"
+            )
+
+        return result_data
+
+    except Exception as e:
+        elapsed = time.time() - file_start_time
+        logger.error(f"[DKKD] Unexpected error for {file.filename}: {e}", exc_info=True)
+        return {
+            "status": 500,
+            "error": str(e),
+            "data": None,
+            "raw_text": raw_text if 'raw_text' in locals() else None,
+            "_meta": {
+                "filename": file.filename,
+                "duration_sec": round(elapsed, 2),
+            }
+        }
+
+
+
 # FILE ACCESS (DEBUG)
 @app.get("/files/{session_id}/{filename}")
 async def get_temp_file(session_id: str, filename: str):
