@@ -22,6 +22,7 @@ PROMPTS = {
     "markdown": "<|grounding|>Convert the document to markdown.",
     "plain":  "Free OCR.",
     "header_only": "Free OCR.",
+    "dkkd": "Free OCR.",  # Giấy ĐKKD - plain OCR, structured extraction done by LLM
 }
 
 
